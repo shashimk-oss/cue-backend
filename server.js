@@ -1,131 +1,122 @@
 require("dotenv").config();
 const express = require("express");
+const app2 = null; // placeholder
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
-const { clerkClient, verifyToken } = require("@clerk/clerk-sdk-node");
+const { clerkClient } = require("@clerk/clerk-sdk-node");
 const fetch = require("node-fetch");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const crypto = require("crypto");
 
 const app = express();
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3000;
 
-// ── Middleware ────────────────────────────────────────────────────────────────
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "10mb" }));
-app.use(cors({
-  origin: [
-    "chrome-extension://*",
-    /^chrome-extension:\/\/.*/
-  ],
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
+app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization"] }));
 
-// Rate limit — 100 requests per 15 minutes per IP
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: { error: "Too many requests, please try again later." }
-});
+const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
 app.use(limiter);
 
-// ── Health check ──────────────────────────────────────────────────────────────
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", service: "cue-backend" });
-});
+// ── Simple token store (in-memory for now) ────────────────────────────────
+// In production this would be Redis or a DB
+const tokenStore = new Map();
 
-// ── Auth middleware ───────────────────────────────────────────────────────────
-// Custom auth middleware for sign-in tokens
-const requireAuth = async (req, res, next) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ error: "No token provided" });
-    }
-    const token = authHeader.split(" ")[1];
+function generateToken(userId) {
+  const token = crypto.randomBytes(32).toString("hex");
+  tokenStore.set(token, { userId, createdAt: Date.now() });
+  return token;
+}
 
-    // Try to verify as a sign-in token by looking up the user
-    // Sign-in tokens are opaque — we store userId alongside token
-    // Use Clerk's token verification
-    const payload = await verifyToken(token, {
-      secretKey: process.env.CLERK_SECRET_KEY
-    });
-
-    req.auth = { userId: payload.sub };
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: "Invalid or expired token" });
+function getUserIdFromToken(token) {
+  const entry = tokenStore.get(token);
+  if (!entry) return null;
+  // Expire after 30 days
+  if (Date.now() - entry.createdAt > 30 * 24 * 60 * 60 * 1000) {
+    tokenStore.delete(token);
+    return null;
   }
+  return entry.userId;
+}
+
+// ── Auth middleware ───────────────────────────────────────────────────────
+const requireAuth = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "NOT_AUTHENTICATED" });
+  }
+  const token = authHeader.split(" ")[1];
+  const userId = getUserIdFromToken(token);
+  if (!userId) return res.status(401).json({ error: "NOT_AUTHENTICATED" });
+  req.auth = { userId };
+  next();
 };
 
-// ── Auth endpoints ───────────────────────────────────────────────────────────
+// ── Health check ──────────────────────────────────────────────────────────
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", service: "cue-backend", users: tokenStore.size });
+});
 
-// Sign up with email/password
+// ── Auth endpoints ────────────────────────────────────────────────────────
 app.post("/api/auth/signup", async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: "Email and password required" });
 
-    // Check if user already exists
+    // Check if user exists
     const existing = await clerkClient.users.getUserList({ emailAddress: [email] });
-    if (existing.length > 0) {
+    if (existing.data && existing.data.length > 0) {
       return res.status(400).json({ error: "An account with this email already exists. Please sign in." });
     }
 
-    // Create user in Clerk
+    // Create user
     const user = await clerkClient.users.createUser({
       emailAddress: [email],
       password
     });
 
-    // Create a sign in token for the new user
-    const signInToken = await clerkClient.signInTokens.createSignInToken({
-      userId: user.id,
-      expiresInSeconds: 2592000 // 30 days
-    });
-
-    res.json({ token: signInToken.token, userId: user.id });
+    const token = generateToken(user.id);
+    res.json({ token, userId: user.id });
   } catch (err) {
+    console.error("Signup error:", err);
     const msg = err.errors?.[0]?.longMessage || err.errors?.[0]?.message || err.message || "Signup failed";
     res.status(400).json({ error: msg });
   }
 });
 
-// Sign in with email/password
 app.post("/api/auth/signin", async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: "Email and password required" });
 
-    // Find user by email
     const users = await clerkClient.users.getUserList({ emailAddress: [email] });
-    if (!users.length) return res.status(401).json({ error: "No account found with this email" });
+    const userList = users.data || users;
+    if (!userList.length) return res.status(401).json({ error: "No account found with this email" });
 
-    const user = users[0];
+    const user = userList[0];
 
     // Verify password
-    const verified = await clerkClient.users.verifyPassword({ userId: user.id, password });
-    if (!verified) return res.status(401).json({ error: "Incorrect password" });
+    try {
+      await clerkClient.users.verifyPassword({ userId: user.id, password });
+    } catch {
+      return res.status(401).json({ error: "Incorrect password" });
+    }
 
-    // Create sign in token
-    const signInToken = await clerkClient.signInTokens.createSignInToken({
-      userId: user.id,
-      expiresInSeconds: 2592000 // 30 days
-    });
-
-    res.json({ token: signInToken.token, userId: user.id });
+    const token = generateToken(user.id);
+    res.json({ token, userId: user.id });
   } catch (err) {
-    const msg = err.errors?.[0]?.message || err.message || "Sign in failed";
-    res.status(401).json({ error: msg });
+    console.error("Signin error:", err);
+    res.status(401).json({ error: "Sign in failed" });
   }
 });
 
-// ── Get user tier and usage ───────────────────────────────────────────────────
-async function getUserUsage(userId) {
+// ── User status ───────────────────────────────────────────────────────────
+async function getUserMeta(userId) {
   try {
     const user = await clerkClient.users.getUser(userId);
     const meta = user.privateMetadata || {};
     const today = new Date().toISOString().split("T")[0];
-
     return {
       isPro: meta.isPro === true,
       usageDate: meta.usageDate || null,
@@ -137,76 +128,53 @@ async function getUserUsage(userId) {
   }
 }
 
-async function incrementUsage(userId, currentUsage) {
-  const today = currentUsage.today;
-  const newCount = currentUsage.usageDate === today
-    ? currentUsage.usageCount + 1
-    : 1;
-
+async function incrementUsage(userId, meta) {
+  const today = meta.today;
+  const newCount = meta.usageDate === today ? meta.usageCount + 1 : 1;
   await clerkClient.users.updateUserMetadata(userId, {
-    privateMetadata: {
-      ...currentUsage,
-      usageDate: today,
-      usageCount: newCount
-    }
+    privateMetadata: { ...meta, usageDate: today, usageCount: newCount }
   });
-
   return newCount;
 }
 
-// ── Routes ────────────────────────────────────────────────────────────────────
-
-// Check user status
 app.get("/api/user/status", requireAuth, async (req, res) => {
   try {
-    const userId = req.auth.userId;
-    const usage = await getUserUsage(userId);
-    const today = usage.today;
-
-    const dailyCount = usage.usageDate === today ? usage.usageCount : 0;
+    const meta = await getUserMeta(req.auth.userId);
+    const today = meta.today;
+    const dailyCount = meta.usageDate === today ? meta.usageCount : 0;
     const FREE_LIMIT = 10;
-
     res.json({
-      isPro: usage.isPro,
+      isPro: meta.isPro,
       dailyCount,
-      dailyLimit: usage.isPro ? null : FREE_LIMIT,
-      remaining: usage.isPro ? null : Math.max(0, FREE_LIMIT - dailyCount)
+      dailyLimit: meta.isPro ? null : FREE_LIMIT,
+      remaining: meta.isPro ? null : Math.max(0, FREE_LIMIT - dailyCount)
     });
   } catch (err) {
     res.status(500).json({ error: "Failed to get user status" });
   }
 });
 
-// Analyze prompt — main endpoint
+// ── Analyze prompt ────────────────────────────────────────────────────────
 app.post("/api/analyze", requireAuth, async (req, res) => {
   try {
-    const userId = req.auth.userId;
     const { prompt, contextHistory, questionRound } = req.body;
+    if (!prompt) return res.status(400).json({ error: "Prompt is required" });
 
-    if (!prompt || typeof prompt !== "string") {
-      return res.status(400).json({ error: "Prompt is required" });
-    }
-
-    // Check usage limits
-    const usage = await getUserUsage(userId);
-    const today = usage.today;
-    const dailyCount = usage.usageDate === today ? usage.usageCount : 0;
+    const meta = await getUserMeta(req.auth.userId);
+    const today = meta.today;
+    const dailyCount = meta.usageDate === today ? meta.usageCount : 0;
     const FREE_LIMIT = 10;
 
-    if (!usage.isPro && dailyCount >= FREE_LIMIT) {
+    if (!meta.isPro && dailyCount >= FREE_LIMIT) {
       return res.status(402).json({
         error: "LIMIT_REACHED",
-        message: "You've used all 10 free suggestions today. Upgrade to Pro for unlimited access.",
-        upgradeUrl: process.env.STRIPE_PAYMENT_LINK
+        message: "You have used all 10 free suggestions today. Upgrade to Pro for unlimited access.",
+        upgradeUrl: process.env.STRIPE_PAYMENT_LINK || ""
       });
     }
 
-    // Call Anthropic
     const result = await analyzePrompt(prompt, contextHistory || [], questionRound || 0);
-
-    // Increment usage
-    await incrementUsage(userId, { ...usage, usageDate: today, usageCount: dailyCount });
-
+    await incrementUsage(req.auth.userId, { ...meta, usageDate: today, usageCount: dailyCount });
     res.json(result);
   } catch (err) {
     console.error("Analyze error:", err);
@@ -214,81 +182,55 @@ app.post("/api/analyze", requireAuth, async (req, res) => {
   }
 });
 
-// Extract file context
+// ── Extract file ──────────────────────────────────────────────────────────
 app.post("/api/extract-file", requireAuth, async (req, res) => {
   try {
-    const { fileData, fileType, fileName } = req.body;
+    const { fileData, fileType } = req.body;
     if (!fileData || !fileType) return res.status(400).json({ error: "File data required" });
-
-    const result = await extractFileContext(fileData, fileType, fileName);
+    const result = await extractFileContext(fileData, fileType);
     res.json(result);
   } catch (err) {
-    console.error("Extract error:", err);
     res.status(500).json({ error: "File extraction failed" });
   }
 });
 
-// Create Stripe checkout session
+// ── Stripe checkout ───────────────────────────────────────────────────────
 app.post("/api/create-checkout", requireAuth, async (req, res) => {
   try {
-    const userId = req.auth.userId;
-    const user = await clerkClient.users.getUser(userId);
+    const user = await clerkClient.users.getUser(req.auth.userId);
     const email = user.emailAddresses[0]?.emailAddress;
-
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "subscription",
       customer_email: email,
-      line_items: [{
-        price: process.env.STRIPE_PRICE_ID,
-        quantity: 1
-      }],
-      success_url: `${process.env.APP_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
+      line_items: [{ price: process.env.STRIPE_PRICE_ID, quantity: 1 }],
+      success_url: `${process.env.APP_URL}/success`,
       cancel_url: `${process.env.APP_URL}/cancel`,
-      metadata: { userId }
+      metadata: { userId: req.auth.userId }
     });
-
     res.json({ url: session.url });
   } catch (err) {
-    console.error("Checkout error:", err);
-    res.status(500).json({ error: "Failed to create checkout session" });
+    res.status(500).json({ error: "Failed to create checkout" });
   }
 });
 
-// Stripe webhook — handle subscription events
+// ── Stripe webhook ────────────────────────────────────────────────────────
 app.post("/api/webhook", express.raw({ type: "application/json" }), async (req, res) => {
   const sig = req.headers["stripe-signature"];
-
   let event;
   try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-  } catch (err) {
-    return res.status(400).json({ error: "Webhook signature failed" });
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET || "");
+  } catch {
+    return res.status(400).json({ error: "Webhook failed" });
   }
-
   if (event.type === "checkout.session.completed") {
-    const session = event.data.object;
-    const userId = session.metadata?.userId;
-    if (userId) {
-      await clerkClient.users.updateUserMetadata(userId, {
-        privateMetadata: { isPro: true, stripeCustomerId: session.customer }
-      });
-    }
+    const userId = event.data.object.metadata?.userId;
+    if (userId) await clerkClient.users.updateUserMetadata(userId, { privateMetadata: { isPro: true } });
   }
-
-  if (event.type === "customer.subscription.deleted") {
-    const sub = event.data.object;
-    const customers = await stripe.customers.list({ limit: 1 });
-    // Find user by stripeCustomerId and downgrade
-    // In production you'd look this up from your DB
-    console.log("Subscription cancelled for customer:", sub.customer);
-  }
-
   res.json({ received: true });
 });
 
-// ── Anthropic helpers ─────────────────────────────────────────────────────────
-
+// ── Anthropic helpers ─────────────────────────────────────────────────────
 async function callAnthropic(messages, system, maxTokens = 2048) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -297,144 +239,84 @@ async function callAnthropic(messages, system, maxTokens = 2048) {
       "x-api-key": process.env.ANTHROPIC_API_KEY,
       "anthropic-version": "2023-06-01"
     },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: maxTokens,
-      system,
-      messages
-    })
+    body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: maxTokens, system, messages })
   });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Anthropic API error ${response.status}`);
-  }
-
+  if (!response.ok) throw new Error(`Anthropic error ${response.status}`);
   const data = await response.json();
   return data.content?.[0]?.text || "";
 }
 
-async function extractFileContext(fileData, fileType, fileName) {
+async function extractFileContext(fileData, fileType) {
   const isImage = fileType.startsWith("image/");
-
-  const messageContent = isImage ? [
-    { type: "image", source: { type: "base64", media_type: fileType, data: fileData } },
-    { type: "text", text: "Extract all relevant information from this document that would help personalize a prompt. Include: name, role, company, skills, specific achievements with numbers, experience, education, and any other concrete details. Return a concise structured summary. No commentary." }
-  ] : [
-    { type: "document", source: { type: "base64", media_type: "application/pdf", data: fileData } },
-    { type: "text", text: "Extract all relevant information from this document that would help personalize a prompt. Include: name, role, company, skills, specific achievements with numbers, experience, education, and any other concrete details. Return a concise structured summary. No commentary." }
-  ];
+  const messageContent = isImage
+    ? [{ type: "image", source: { type: "base64", media_type: fileType, data: fileData } }, { type: "text", text: "Extract all relevant information: name, role, company, skills, achievements with numbers, experience, education. Return a concise structured summary." }]
+    : [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: fileData } }, { type: "text", text: "Extract all relevant information: name, role, company, skills, achievements with numbers, experience, education. Return a concise structured summary." }];
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01"
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
-      messages: [{ role: "user", content: messageContent }]
-    })
+    headers: { "Content-Type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1024, messages: [{ role: "user", content: messageContent }] })
   });
-
-  if (!response.ok) throw new Error("File extraction failed");
   const data = await response.json();
   return { extracted: data.content?.[0]?.text || "" };
 }
 
 async function analyzePrompt(prompt, contextHistory, questionRound) {
   if (prompt.trim().length < 10) return { type: "null", suggestion: null };
-
   const forceGenerate = questionRound >= 2;
 
   const systemPrompt = `<task_context>
-You are an expert prompt engineer. Your job is to help users build high-quality, fully structured prompts for any task — writing, coding, analysis, research, creative work, summarization, or anything else. You work in two phases.
-
-PHASE 1: Gather the two pieces of context you cannot infer (max 2 questions)
+You are an expert prompt engineer helping users build high-quality structured prompts for any task. Work in two phases:
+PHASE 1: Ask up to 2 targeted questions to gather context you cannot infer
 PHASE 2: Build a complete structured prompt following Anthropic's best practice format
 </task_context>
 
 <two_question_sequence>
-You always ask exactly these two questions in order, adapted to the task type:
-
-QUESTION 1 — Audience and purpose
-What you need: who is this for, what outcome does it need to achieve, any relevant constraints.
-Keep it to one short conversational question. Combine audience + purpose naturally.
-
-QUESTION 2 — User context and background
-What you need: who the user is, their relevant experience, specific details, credentials, or constraints they bring to this task.
-Always mention they can attach a file (resume, doc, code, brief) instead of typing.
-
-Never skip question 2. Never assume who the user is. Always ask for their background before generating.
+QUESTION 1: Ask about audience and purpose — who is this for and what outcome is needed. One short conversational question.
+QUESTION 2: Ask about the user's background, experience, and relevant context. Mention they can attach a file.
+Never skip question 2. Never assume the user's identity.
 </two_question_sequence>
 
-<when_to_skip_questions>
-Skip question 1 if the prompt already clearly states the audience, purpose, and constraints.
-Skip question 2 if the prompt already clearly states the user's background, credentials, and relevant context.
-Skip both and generate immediately if the prompt contains all necessary context.
-</when_to_skip_questions>
-
 <structured_prompt_format>
-Every suggestion must follow Anthropic's 7-section structure:
-
-1. TASK CONTEXT — Role + high-level task using actual details from user's answers
-2. TONE CONTEXT — How the AI should communicate, specific to the task
-3. BACKGROUND DATA — All user-provided context with XML tags, real details only, no placeholders
-4. DETAILED TASK INSTRUCTIONS — Step-by-step breakdown, numbered, specific order
-5. EXAMPLES — One strong example and one weak example with checkmarks
+Every suggestion must follow these 7 sections:
+1. TASK CONTEXT — Role and high-level task using actual user details
+2. TONE CONTEXT — How the AI should communicate
+3. BACKGROUND DATA — All user context with XML tags, real details only
+4. DETAILED TASK INSTRUCTIONS — Numbered step-by-step breakdown
+5. EXAMPLES — One strong and one weak example
 6. OUTPUT FORMAT — Exact format, length, structure
 7. REMINDER — Most critical instruction repeated
 </structured_prompt_format>
 
 <strict_rules>
-- Never use placeholder brackets: [name], [company], [your achievement] etc.
-- Never assume the user's role or background — only use what they told you
-- After 2 questions, always generate — no more questions
-- The output must work as a complete ready-to-use prompt
-${forceGenerate ? "OVERRIDE: You have reached max questions. Generate the full structured prompt NOW using all context gathered." : ""}
+- Never use placeholder brackets like [name] or [company]
+- Never assume the user's role — only use what they told you
+- After 2 questions, always generate
+- Output must be ready to use immediately
+${forceGenerate ? "OVERRIDE: Generate the full structured prompt now using all context gathered." : ""}
 </strict_rules>
 
 <output_format>
-Return ONLY valid JSON. No markdown fences, no text outside JSON.
-
-When asking question 1:
-{"type": "question", "questionNumber": 1, "question": "...", "allowFile": false, "improved": null, "reason": null, "originalScore": 0-100, "improvedScore": null}
-
-When asking question 2:
-{"type": "question", "questionNumber": 2, "question": "...", "allowFile": true, "improved": null, "reason": null, "originalScore": 0-100, "improvedScore": null}
-
-When generating:
-{"type": "suggestion", "questionNumber": null, "question": null, "allowFile": false, "improved": "full 7-section structured prompt", "reason": "one sentence on most important improvement", "originalScore": 0-100, "improvedScore": 0-100}
-
-When already excellent:
-{"type": "null", "questionNumber": null, "question": null, "allowFile": false, "improved": null, "reason": null, "originalScore": 0-100, "improvedScore": null}
+Return ONLY valid JSON:
+Question 1: {"type":"question","questionNumber":1,"question":"...","allowFile":false,"improved":null,"reason":null,"originalScore":0-100,"improvedScore":null}
+Question 2: {"type":"question","questionNumber":2,"question":"...","allowFile":true,"improved":null,"reason":null,"originalScore":0-100,"improvedScore":null}
+Suggestion: {"type":"suggestion","questionNumber":null,"question":null,"allowFile":false,"improved":"full 7-section prompt","reason":"one sentence","originalScore":0-100,"improvedScore":0-100}
+Already good: {"type":"null","questionNumber":null,"question":null,"allowFile":false,"improved":null,"reason":null,"originalScore":0-100,"improvedScore":null}
 </output_format>`;
 
   let userMessage = `<original_prompt>${prompt}</original_prompt>\n`;
-
   if (contextHistory.length > 0) {
     userMessage += `\n<context_gathered>\n`;
-    contextHistory.forEach((turn, i) => {
-      userMessage += `Q${i + 1}: ${turn.question}\nA${i + 1}: ${turn.answer}\n\n`;
-    });
+    contextHistory.forEach((t, i) => { userMessage += `Q${i+1}: ${t.question}\nA${i+1}: ${t.answer}\n\n`; });
     userMessage += `</context_gathered>\n\n`;
-
-    if (forceGenerate) {
-      userMessage += `Build the complete 7-section structured prompt now using all context. No more questions.`;
-    } else {
-      userMessage += `Ask question ${contextHistory.length + 1} following the two-question sequence.`;
-    }
+    userMessage += forceGenerate
+      ? "Build the complete 7-section structured prompt now. No more questions."
+      : `Ask question ${contextHistory.length + 1}.`;
   } else {
-    userMessage += `\nAnalyze this prompt. Check if it already has audience/purpose AND user background. If not, ask question 1.`;
+    userMessage += `\nCheck if the prompt has both audience/purpose AND user background. If not, ask question 1.`;
   }
 
-  const text = await callAnthropic(
-    [{ role: "user", content: userMessage }],
-    systemPrompt,
-    2048
-  );
+  const text = await callAnthropic([{ role: "user", content: userMessage }], systemPrompt, 2048);
 
   try {
     const clean = text.replace(/```json|```/g, "").trim();
@@ -454,7 +336,4 @@ When already excellent:
   }
 }
 
-// ── Start server ──────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`Cue backend running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Cue backend running on port ${PORT}`));
