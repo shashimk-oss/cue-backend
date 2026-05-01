@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
-const { ClerkExpressRequireAuth, clerkClient } = require("@clerk/clerk-sdk-node");
+const { clerkClient, verifyToken } = require("@clerk/clerk-sdk-node");
 const fetch = require("node-fetch");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
@@ -34,7 +34,28 @@ app.get("/health", (req, res) => {
 });
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
-const requireAuth = ClerkExpressRequireAuth({});
+// Custom auth middleware for sign-in tokens
+const requireAuth = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "No token provided" });
+    }
+    const token = authHeader.split(" ")[1];
+
+    // Try to verify as a sign-in token by looking up the user
+    // Sign-in tokens are opaque — we store userId alongside token
+    // Use Clerk's token verification
+    const payload = await verifyToken(token, {
+      secretKey: process.env.CLERK_SECRET_KEY
+    });
+
+    req.auth = { userId: payload.sub };
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
+};
 
 // ── Auth endpoints ───────────────────────────────────────────────────────────
 
@@ -44,18 +65,27 @@ app.post("/api/auth/signup", async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: "Email and password required" });
 
+    // Check if user already exists
+    const existing = await clerkClient.users.getUserList({ emailAddress: [email] });
+    if (existing.length > 0) {
+      return res.status(400).json({ error: "An account with this email already exists. Please sign in." });
+    }
+
     // Create user in Clerk
     const user = await clerkClient.users.createUser({
       emailAddress: [email],
       password
     });
 
-    // Generate a session token
-    const token = await clerkClient.sessions.createSession({ userId: user.id });
+    // Create a sign in token for the new user
+    const signInToken = await clerkClient.signInTokens.createSignInToken({
+      userId: user.id,
+      expiresInSeconds: 2592000 // 30 days
+    });
 
-    res.json({ token: token.id, userId: user.id });
+    res.json({ token: signInToken.token, userId: user.id });
   } catch (err) {
-    const msg = err.errors?.[0]?.message || err.message || "Signup failed";
+    const msg = err.errors?.[0]?.longMessage || err.errors?.[0]?.message || err.message || "Signup failed";
     res.status(400).json({ error: msg });
   }
 });
@@ -66,14 +96,26 @@ app.post("/api/auth/signin", async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: "Email and password required" });
 
-    // Verify with Clerk
-    const signIn = await clerkClient.signInTokens.createSignInToken({
-      userId: (await clerkClient.users.getUserList({ emailAddress: [email] }))[0]?.id
+    // Find user by email
+    const users = await clerkClient.users.getUserList({ emailAddress: [email] });
+    if (!users.length) return res.status(401).json({ error: "No account found with this email" });
+
+    const user = users[0];
+
+    // Verify password
+    const verified = await clerkClient.users.verifyPassword({ userId: user.id, password });
+    if (!verified) return res.status(401).json({ error: "Incorrect password" });
+
+    // Create sign in token
+    const signInToken = await clerkClient.signInTokens.createSignInToken({
+      userId: user.id,
+      expiresInSeconds: 2592000 // 30 days
     });
 
-    res.json({ token: signIn.token });
+    res.json({ token: signInToken.token, userId: user.id });
   } catch (err) {
-    res.status(401).json({ error: "Invalid email or password" });
+    const msg = err.errors?.[0]?.message || err.message || "Sign in failed";
+    res.status(401).json({ error: msg });
   }
 });
 
