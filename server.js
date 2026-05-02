@@ -183,7 +183,7 @@ app.get("/api/user/status", requireAuth, async (req, res) => {
 
 app.post("/api/analyze", requireAuth, async (req, res) => {
   try {
-    const { prompt, contextHistory, questionRound, taskType } = req.body;
+    const { prompt, contextHistory, questionRound, domain, primary_intent, secondary_intents, intent_confidence } = req.body;
     if (!prompt) return res.status(400).json({ error: "Prompt is required" });
     const meta = await getUserMeta(req.auth.userId);
     const today = meta.today;
@@ -192,7 +192,7 @@ app.post("/api/analyze", requireAuth, async (req, res) => {
     if (!meta.isPro && dailyCount >= FREE_LIMIT) {
       return res.status(402).json({ error: "LIMIT_REACHED", message: "You have used all 10 free suggestions today.", upgradeUrl: process.env.STRIPE_PAYMENT_LINK || "" });
     }
-    const result = await analyzePrompt(prompt, contextHistory || [], questionRound || 0, taskType || "general");
+    const result = await analyzePrompt(prompt, contextHistory || [], questionRound || 0, domain || "general", primary_intent || null, secondary_intents || [], intent_confidence || 0.5);
     if (result.type === "suggestion") await incrementUsage(req.auth.userId, { ...meta, usageDate: today, usageCount: dailyCount });
     res.json(result);
   } catch (err) {
@@ -261,39 +261,118 @@ async function extractFileContext(fileData, fileType) {
   return { extracted: data.content?.[0]?.text || "" };
 }
 
-async function analyzePrompt(prompt, contextHistory, questionRound, taskType) {
+// ── Intent-aware templates ────────────────────────────────────────────────
+
+const INTENT_QUESTIONS = {
+  create:        { q1: "Who is the audience and what outcome should this achieve?",            q1file: false, q1label: "",                               q2: "What tone and format do you want?",                                             q2file: true,  q2label: "Attach a reference or brief" },
+  transform:     { q1: "What specifically needs changing — tone, structure, or content?",      q1file: true,  q1label: "Attach the original",            q2: "Who is the intended reader and what should the result feel like?",              q2file: false, q2label: "" },
+  analyze:       { q1: "What specific question are you trying to answer?",                     q1file: true,  q1label: "Attach data or documents",       q2: "What output format do you need — bullets, table, or narrative?",               q2file: false, q2label: "" },
+  research:      { q1: "What specific question or hypothesis are you trying to validate?",     q1file: false, q1label: "",                               q2: "What sources or constraints should I focus on?",                               q2file: true,  q2label: "Attach relevant documents" },
+  summarize:     { q1: "What is the most important thing the summary needs to capture?",       q1file: true,  q1label: "Attach the document to summarize", q2: "How long should it be and for what audience?",                               q2file: false, q2label: "" },
+  extract:       { q1: "What specific information do you need extracted?",                     q1file: true,  q1label: "Attach the source document",     q2: "What format should the extracted data be in?",                                 q2file: false, q2label: "" },
+  classify:      { q1: "What categories or criteria should be used?",                          q1file: true,  q1label: "Attach items to classify",       q2: "What should the output structure look like?",                                  q2file: false, q2label: "" },
+  compare:       { q1: "What criteria matter most for this comparison?",                       q1file: false, q1label: "",                               q2: "What decision or outcome does this comparison support?",                        q2file: false, q2label: "" },
+  plan:          { q1: "What is the timeframe and what are the key constraints?",              q1file: false, q1label: "",                               q2: "How detailed should this be — high-level milestones or step-by-step?",         q2file: false, q2label: "" },
+  critique:      { q1: "What aspects should the critique focus on?",                           q1file: true,  q1label: "Attach the work to critique",    q2: "Who is the intended audience for this feedback?",                              q2file: false, q2label: "" },
+  optimize:      { q1: "What specific metric or outcome do you want to improve?",              q1file: true,  q1label: "Attach the current version",     q2: "What constraints or trade-offs should be respected?",                          q2file: false, q2label: "" },
+  explain:       { q1: "What is the background level of the audience — beginner or expert?",   q1file: false, q1label: "",                               q2: "What aspect is most confusing or needs the most depth?",                       q2file: true,  q2label: "Attach related material" },
+  generate_code: { q1: "What is the tech stack and what exactly should this code do?",         q1file: true,  q1label: "Attach existing code or spec",   q2: "Are there constraints — performance, style, or dependencies?",                 q2file: false, q2label: "" },
+  debug:         { q1: "What is the current behaviour and what should it do instead?",         q1file: true,  q1label: "Attach a screenshot of the error", q2: "What is the tech stack and any relevant error messages?",                   q2file: false, q2label: "" },
+  ideate:        { q1: "What problem are you solving and who is it for?",                      q1file: false, q1label: "",                               q2: "Are there any constraints or directions to avoid?",                            q2file: false, q2label: "" },
+  decide:        { q1: "What are the options and what criteria matter most?",                  q1file: false, q1label: "",                               q2: "What trade-offs are you most concerned about?",                                q2file: false, q2label: "" },
+};
+
+const INTENT_PROMPT_TEMPLATES = {
+  create:        "Role → Task → Audience → Tone → Format → Constraints → Success criteria",
+  transform:     "Role → Original content → Transformation goal → Audience → Tone → Format → What to preserve",
+  analyze:       "Role → Data/context → Analysis dimensions → Key question → Output format → Constraints → Deliverable",
+  research:      "Role → Research question → Scope → Sources → Methodology → Output format → Deliverable",
+  summarize:     "Role → Source material → Key focus → Audience → Length → Format → What to omit",
+  extract:       "Role → Source material → What to extract → Format → Output structure → Edge cases → Deliverable",
+  classify:      "Role → Items → Categories → Criteria → Output format → Edge cases → Deliverable",
+  compare:       "Role → Items to compare → Criteria → Weights → Output format → Recommendation requirement → Deliverable",
+  plan:          "Role → Goal → Timeframe → Constraints → Level of detail → Format → Success criteria",
+  critique:      "Role → Work to critique → Focus areas → Audience → Tone → Format → Actionability",
+  optimize:      "Role → Current state → Target metric → Constraints → Trade-offs → Output format → Success criteria",
+  explain:       "Role → Concept → Audience level → Depth → Analogies → Format → Examples",
+  generate_code: "Role → Task → Tech stack → Requirements → Constraints → Style → Output format",
+  debug:         "Role → Code/system → Current behaviour → Expected behaviour → Error messages → Tech stack → Fix requirements",
+  ideate:        "Role → Problem → Audience → Constraints → Quantity → Format → Evaluation criteria",
+  decide:        "Role → Options → Criteria → Weights → Constraints → Format → Recommendation requirement",
+};
+
+const DOMAIN_MODIFIERS = {
+  email:    "Include a subject line. Keep language professional yet appropriately warm.",
+  coding:   "Include language and framework context. Prefer working, runnable examples.",
+  research: "Distinguish facts from inference. Note where sources should be cited.",
+  sales:    "Frame around customer value and outcomes. Be specific about ROI.",
+  general:  "",
+};
+
+async function analyzePrompt(prompt, contextHistory, questionRound, domain, primary_intent, secondary_intents, intent_confidence) {
   if (prompt.trim().length < 10) return { type: "null", suggestion: null };
+
   const forceGenerate = questionRound >= 2;
-  const strategies = {
-    design: { q1: "What specific issue are you trying to fix or improve with this design?", q1file: true, q1label: "Attach a screenshot of the current screen", q2: "What should the result look like? Describe the desired outcome.", q2file: true, q2label: "Attach a reference design", context: "UI/design/layout task" },
-    code: { q1: "What is the current behaviour and what should it do instead?", q1file: true, q1label: "Attach a screenshot of the error", q2: "What is the tech stack and any relevant constraints?", q2file: false, q2label: "", context: "coding/development task" },
-    writing: { q1: "Who are you writing to and what outcome do you need?", q1file: false, q1label: "", q2: "What is your background and the key points to include?", q2file: true, q2label: "Attach resume, brief, or reference doc", context: "writing task" },
-    analysis: { q1: "What specific question are you trying to answer?", q1file: true, q1label: "Attach relevant data or documents", q2: "What context or constraints should I know about?", q2file: true, q2label: "Attach supporting documents", context: "analysis/research task" },
-    general: { q1: "Who is this for and what outcome do you need?", q1file: false, q1label: "", q2: "What is your relevant background or context?", q2file: true, q2label: "Attach a relevant file", context: "general task" }
-  };
-  const s = strategies[taskType] || strategies.general;
-  const systemPrompt = `You are an expert prompt engineer. Task type: ${taskType.toUpperCase()} (${s.context}).
-Ask up to 2 targeted questions then build a 7-section structured prompt.
-Q1: ${s.q1} ${s.q1file ? "(file upload: " + s.q1label + ")" : ""}
-Q2: ${s.q2} ${s.q2file ? "(file upload: " + s.q2label + ")" : ""}
-Skip questions if prompt already has enough context.
-${forceGenerate ? "OVERRIDE: Generate the full structured prompt NOW." : ""}
-Return ONLY valid JSON:
-Question: {"type":"question","questionNumber":1or2,"question":"...","allowFile":true/false,"fileLabel":"...","improved":null,"reason":null,"originalScore":0-100,"improvedScore":null}
-Suggestion: {"type":"suggestion","questionNumber":null,"question":null,"allowFile":false,"fileLabel":"","improved":"full 7-section prompt","reason":"one sentence","originalScore":0-100,"improvedScore":0-100}
-No match: {"type":"null","questionNumber":null,"question":null,"allowFile":false,"fileLabel":"","improved":null,"reason":null,"originalScore":0-100,"improvedScore":null}`;
-  let userMsg = "<original_prompt>" + prompt + "</original_prompt>\n<task_type>" + taskType + "</task_type>\n";
+  const lowConfidence = !primary_intent || intent_confidence < 0.4;
+
+  // Fall back to a general template when confidence is too low
+  const intent = lowConfidence ? null : primary_intent;
+  const q = intent ? INTENT_QUESTIONS[intent] : INTENT_QUESTIONS.create;
+  const template = intent ? INTENT_PROMPT_TEMPLATES[intent] : INTENT_PROMPT_TEMPLATES.create;
+  const domainMod = DOMAIN_MODIFIERS[domain] || "";
+
+  // Build secondary intent note for multi-intent prompts
+  const secondaryNote = secondary_intents?.length
+    ? `Secondary intents detected: ${secondary_intents.join(", ")}. If complementary, merge into one prompt. If conflicting, note stepwise execution in the reason field.`
+    : "";
+
+  const intentLine = intent
+    ? `Primary intent: ${intent.toUpperCase()}\nPrompt template to follow: ${template}`
+    : `Intent unclear — determine the best intent from the prompt and pick appropriate questions.`;
+
+  const systemPrompt = `You are an expert prompt engineer specialising in structured prompt construction.
+Domain: ${(domain || "general").toUpperCase()}
+${intentLine}
+${domainMod ? `Domain modifier: ${domainMod}` : ""}
+${secondaryNote}
+
+Ask up to 2 targeted questions to gather missing context, then build a 7-section structured prompt.
+Q1: ${q.q1}${q.q1file ? ` (allow file upload: ${q.q1label})` : ""}
+Q2: ${q.q2}${q.q2file ? ` (allow file upload: ${q.q2label})` : ""}
+
+Skip questions if the prompt already contains enough context to build a great structured prompt.
+${forceGenerate ? "OVERRIDE: The user has answered enough questions. Generate the full structured prompt NOW." : ""}
+
+Return ONLY valid JSON — no markdown, no explanation:
+Question: {"type":"question","questionNumber":1,"question":"...","allowFile":true/false,"fileLabel":"...","improved":null,"reason":null,"originalScore":0-100,"improvedScore":null}
+Suggestion: {"type":"suggestion","questionNumber":null,"question":null,"allowFile":false,"fileLabel":"","improved":"full structured prompt","reason":"one sentence why this is better","originalScore":0-100,"improvedScore":0-100}
+No match: {"type":"null","questionNumber":null,"question":null,"allowFile":false,"fileLabel":"","improved":null,"reason":null,"originalScore":null,"improvedScore":null}`;
+
+  let userMsg = `<original_prompt>${prompt}</original_prompt>\n<domain>${domain || "general"}</domain>\n<intent>${intent || "unknown"}</intent>\n`;
   if (contextHistory.length > 0) {
     userMsg += "\n<context_gathered>\n";
-    contextHistory.forEach((t, i) => { userMsg += "Q" + (i+1) + ": " + t.question + "\nA" + (i+1) + ": " + t.answer + "\n\n"; });
+    contextHistory.forEach((t, i) => { userMsg += `Q${i+1}: ${t.question}\nA${i+1}: ${t.answer}\n\n`; });
     userMsg += "</context_gathered>\n\n";
-    userMsg += forceGenerate ? "Build the complete 7-section prompt now." : "Ask question " + (contextHistory.length + 1) + ".";
-  } else { userMsg += "\nCheck if prompt needs more context. If so ask Q1."; }
+    userMsg += forceGenerate ? "Build the complete structured prompt now." : `Ask question ${contextHistory.length + 1}.`;
+  } else {
+    userMsg += "\nCheck if the prompt needs more context. If so, ask Q1. If it already has enough context, generate the structured prompt directly.";
+  }
+
   const text = await callAnthropic([{ role: "user", content: userMsg }], systemPrompt, 2048);
   try {
     const clean = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
-    return { type: parsed.type || "null", questionNumber: parsed.questionNumber || null, question: parsed.question || null, allowFile: parsed.allowFile || false, fileLabel: parsed.fileLabel || null, suggestion: parsed.improved || null, reason: parsed.reason || null, originalScore: parsed.originalScore || null, improvedScore: parsed.improvedScore || null };
+    return {
+      type: parsed.type || "null",
+      questionNumber: parsed.questionNumber || null,
+      question: parsed.question || null,
+      allowFile: parsed.allowFile || false,
+      fileLabel: parsed.fileLabel || null,
+      suggestion: parsed.improved || null,
+      reason: parsed.reason || null,
+      originalScore: parsed.originalScore || null,
+      improvedScore: parsed.improvedScore || null,
+    };
   } catch { return { type: "null", suggestion: null }; }
 }
 
