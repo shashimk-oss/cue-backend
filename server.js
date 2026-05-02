@@ -336,17 +336,23 @@ ${intentLine}
 ${domainMod ? `Domain modifier: ${domainMod}` : ""}
 ${secondaryNote}
 
-Ask up to 2 targeted questions to gather missing context, then build a 7-section structured prompt.
+Your job is to ALWAYS either ask a question or generate a structured prompt. Never return null unless the input is pure gibberish or completely off-topic (not an AI prompt at all).
+
+Decision rules:
+1. If the prompt lacks key context (audience, goal, tone, constraints) → ask Q1 to gather it.
+2. If Q1 has been answered but more detail would help → ask Q2.
+3. If enough context exists → generate the full structured prompt.
+4. NEVER return null for anything that resembles an AI prompt request, however short.
+
 Q1: ${q.q1}${q.q1file ? ` (allow file upload: ${q.q1label})` : ""}
 Q2: ${q.q2}${q.q2file ? ` (allow file upload: ${q.q2label})` : ""}
 
-Skip questions if the prompt already contains enough context to build a great structured prompt.
 ${forceGenerate ? "OVERRIDE: The user has answered enough questions. Generate the full structured prompt NOW." : ""}
 
 Return ONLY valid JSON — no markdown, no explanation:
 Question: {"type":"question","questionNumber":1,"question":"...","allowFile":true/false,"fileLabel":"...","improved":null,"reason":null,"originalScore":0-100,"improvedScore":null}
 Suggestion: {"type":"suggestion","questionNumber":null,"question":null,"allowFile":false,"fileLabel":"","improved":"full structured prompt","reason":"one sentence why this is better","originalScore":0-100,"improvedScore":0-100}
-No match: {"type":"null","questionNumber":null,"question":null,"allowFile":false,"fileLabel":"","improved":null,"reason":null,"originalScore":null,"improvedScore":null}`;
+Null (only for pure gibberish/off-topic): {"type":"null","questionNumber":null,"question":null,"allowFile":false,"fileLabel":"","improved":null,"reason":null,"originalScore":null,"improvedScore":null}`;
 
   let userMsg = `<original_prompt>${prompt}</original_prompt>\n<domain>${domain || "general"}</domain>\n<intent>${intent || "unknown"}</intent>\n`;
   if (contextHistory.length > 0) {
@@ -360,7 +366,22 @@ No match: {"type":"null","questionNumber":null,"question":null,"allowFile":false
 
   const text = await callAnthropic([{ role: "user", content: userMsg }], systemPrompt, 2048);
   const parsed = extractJSON(text);
-  if (!parsed) return { type: "null", suggestion: null };
+
+  // Hard fallback: if model returns null for a non-gibberish prompt, ask Q1 instead
+  if (!parsed || parsed.type === "null") {
+    return {
+      type: "question",
+      questionNumber: 1,
+      question: q.q1,
+      allowFile: q.q1file,
+      fileLabel: q.q1label || null,
+      suggestion: null,
+      reason: null,
+      originalScore: null,
+      improvedScore: null,
+    };
+  }
+
   return {
     type: parsed.type || "null",
     questionNumber: parsed.questionNumber || null,
