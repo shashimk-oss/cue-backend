@@ -154,13 +154,12 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 
     resetCodes.set(email, { code, userId: user.id, expiresAt });
 
-    // Send email via Clerk
-    const emailAddressId = user.emailAddresses[0]?.id;
-    await clerkClient.emails.createEmail({
-      fromEmailName: "noreply",
-      emailAddressId,
-      subject: "Reset your Cue password",
-      body: `Your Cue password reset code is: ${code}\n\nThis code expires in 10 minutes.\n\nIf you didn't request this, ignore this email.`
+    // Send reset code via Resend
+    await resend.emails.send({
+      from: "Cue <onboarding@resend.dev>",
+      to: email,
+      subject: "Your Cue password reset code",
+      html: "<div style='font-family:sans-serif;max-width:400px;margin:0 auto;padding:40px 20px;'><h2 style='color:#111827;'>Reset your Cue password</h2><p style='color:#6b7280;'>Your reset code is:</p><div style='background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:24px;text-align:center;margin:24px 0;'><div style='font-size:36px;font-weight:800;letter-spacing:0.2em;color:#4f46e5;'>" + code + "</div></div><p style='color:#9ca3af;font-size:13px;'>Expires in 10 minutes. Ignore if you did not request this.</p></div>"
     });
 
     res.json({ success: true, message: "Reset code sent to your email." });
