@@ -21,7 +21,7 @@ app.use(limiter);
 // ── Postgres token store ─────────────────────────────────────────────────
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes("railway") ? { rejectUnauthorized: false } : false
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
 // Create tokens table if it doesn't exist
@@ -131,6 +131,9 @@ app.post("/api/auth/signin", async (req, res) => {
 });
 
 // ── Password reset ───────────────────────────────────────────────────────
+// Store reset codes temporarily (in production use Redis/DB)
+const resetCodes = new Map();
+
 app.post("/api/auth/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
@@ -138,22 +141,71 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 
     const users = await clerkClient.users.getUserList({ emailAddress: [email] });
     const userList = users.data || users;
+
     if (!userList.length) {
-      // Don't reveal if email exists
-      return res.json({ success: true, message: "If an account exists, a reset email has been sent." });
+      return res.json({ success: true, message: "If an account exists, a reset code has been sent." });
     }
 
-    // Create a password reset link via Clerk
-    await clerkClient.users.createMagicLink({
-      userId: userList[0].id,
-      redirectUrl: "https://cue-backend-production-4585.up.railway.app/reset-password"
+    const user = userList[0];
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+    resetCodes.set(email, { code, userId: user.id, expiresAt });
+
+    // Send email via Clerk
+    const emailAddressId = user.emailAddresses[0]?.id;
+    await clerkClient.emails.createEmail({
+      fromEmailName: "noreply",
+      emailAddressId,
+      subject: "Reset your Cue password",
+      body: `Your Cue password reset code is: ${code}\n\nThis code expires in 10 minutes.\n\nIf you didn't request this, ignore this email.`
     });
 
-    res.json({ success: true, message: "Password reset email sent. Check your inbox." });
+    res.json({ success: true, message: "Reset code sent to your email." });
   } catch (err) {
     console.error("Forgot password error:", err);
-    // Still return success to avoid email enumeration
-    res.json({ success: true, message: "If an account exists, a reset email has been sent." });
+    res.status(500).json({ error: "Failed to send reset code. Try again." });
+  }
+});
+
+app.post("/api/auth/verify-reset-code", async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code) return res.status(400).json({ error: "Email and code required" });
+
+    const entry = resetCodes.get(email);
+    if (!entry) return res.status(400).json({ error: "No reset code found. Request a new one." });
+    if (Date.now() > entry.expiresAt) {
+      resetCodes.delete(email);
+      return res.status(400).json({ error: "Code expired. Request a new one." });
+    }
+    if (entry.code !== code.trim()) return res.status(400).json({ error: "Incorrect code. Try again." });
+
+    res.json({ success: true, userId: entry.userId });
+  } catch (err) {
+    res.status(500).json({ error: "Verification failed" });
+  }
+});
+
+app.post("/api/auth/reset-password", async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+    if (!email || !code || !newPassword) return res.status(400).json({ error: "All fields required" });
+
+    const entry = resetCodes.get(email);
+    if (!entry || entry.code !== code.trim() || Date.now() > entry.expiresAt) {
+      return res.status(400).json({ error: "Invalid or expired code." });
+    }
+
+    if (newPassword.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters." });
+
+    await clerkClient.users.updateUser(entry.userId, { password: newPassword });
+    resetCodes.delete(email);
+
+    res.json({ success: true, message: "Password reset successfully. You can now sign in." });
+  } catch (err) {
+    console.error("Reset password error:", err);
+    res.status(500).json({ error: "Failed to reset password. Try again." });
   }
 });
 
