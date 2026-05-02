@@ -1,5 +1,6 @@
 require("dotenv").config();
 const express = require("express");
+const { Pool } = require("pg");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const { clerkClient } = require("@clerk/clerk-sdk-node");
@@ -17,33 +18,65 @@ app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders:
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
 app.use(limiter);
 
-// ── Token store ───────────────────────────────────────────────────────────
-const tokenStore = new Map();
+// ── Postgres token store ─────────────────────────────────────────────────
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL?.includes("railway") ? { rejectUnauthorized: false } : false
+});
 
-function generateToken(userId) {
+// Create tokens table if it doesn't exist
+async function initDB() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS tokens (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        created_at BIGINT NOT NULL
+      )
+    `);
+    console.log("Database ready");
+  } catch (err) {
+    console.error("DB init error:", err.message);
+  }
+}
+initDB();
+
+async function generateToken(userId) {
   const token = crypto.randomBytes(32).toString("hex");
-  tokenStore.set(token, { userId, createdAt: Date.now() });
+  await pool.query(
+    "INSERT INTO tokens (token, user_id, created_at) VALUES ($1, $2, $3)",
+    [token, userId, Date.now()]
+  );
   return token;
 }
 
-function getUserIdFromToken(token) {
-  const entry = tokenStore.get(token);
-  if (!entry) return null;
-  if (Date.now() - entry.createdAt > 30 * 24 * 60 * 60 * 1000) {
-    tokenStore.delete(token);
+async function getUserIdFromToken(token) {
+  try {
+    const result = await pool.query(
+      "SELECT user_id, created_at FROM tokens WHERE token = $1",
+      [token]
+    );
+    if (!result.rows.length) return null;
+    const { user_id, created_at } = result.rows[0];
+    // Expire after 30 days
+    if (Date.now() - parseInt(created_at) > 30 * 24 * 60 * 60 * 1000) {
+      await pool.query("DELETE FROM tokens WHERE token = $1", [token]);
+      return null;
+    }
+    return user_id;
+  } catch {
     return null;
   }
-  return entry.userId;
 }
 
 // ── Auth middleware ───────────────────────────────────────────────────────
-const requireAuth = (req, res, next) => {
+const requireAuth = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ error: "NOT_AUTHENTICATED" });
   }
   const token = authHeader.split(" ")[1];
-  const userId = getUserIdFromToken(token);
+  const userId = await getUserIdFromToken(token);
   if (!userId) return res.status(401).json({ error: "NOT_AUTHENTICATED" });
   req.auth = { userId };
   next();
@@ -51,7 +84,7 @@ const requireAuth = (req, res, next) => {
 
 // ── Health ────────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", service: "cue-backend", users: tokenStore.size });
+  res.json({ status: "ok", service: "cue-backend" });
 });
 
 // ── Auth ──────────────────────────────────────────────────────────────────
@@ -66,7 +99,7 @@ app.post("/api/auth/signup", async (req, res) => {
     }
 
     const user = await clerkClient.users.createUser({ emailAddress: [email], password });
-    const token = generateToken(user.id);
+    const token = await generateToken(user.id);
     res.json({ token, userId: user.id });
   } catch (err) {
     const msg = err.errors?.[0]?.longMessage || err.errors?.[0]?.message || err.message || "Signup failed";
@@ -90,10 +123,37 @@ app.post("/api/auth/signin", async (req, res) => {
       return res.status(401).json({ error: "Incorrect password" });
     }
 
-    const token = generateToken(user.id);
+    const token = await generateToken(user.id);
     res.json({ token, userId: user.id });
   } catch (err) {
     res.status(401).json({ error: "Sign in failed" });
+  }
+});
+
+// ── Password reset ───────────────────────────────────────────────────────
+app.post("/api/auth/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "Email required" });
+
+    const users = await clerkClient.users.getUserList({ emailAddress: [email] });
+    const userList = users.data || users;
+    if (!userList.length) {
+      // Don't reveal if email exists
+      return res.json({ success: true, message: "If an account exists, a reset email has been sent." });
+    }
+
+    // Create a password reset link via Clerk
+    await clerkClient.users.createMagicLink({
+      userId: userList[0].id,
+      redirectUrl: "https://cue-backend-production-4585.up.railway.app/reset-password"
+    });
+
+    res.json({ success: true, message: "Password reset email sent. Check your inbox." });
+  } catch (err) {
+    console.error("Forgot password error:", err);
+    // Still return success to avoid email enumeration
+    res.json({ success: true, message: "If an account exists, a reset email has been sent." });
   }
 });
 
@@ -146,12 +206,7 @@ app.post("/api/analyze", requireAuth, async (req, res) => {
     }
 
     const result = await analyzePrompt(prompt, contextHistory || [], questionRound || 0, taskType || "general");
-    
-    // Only count usage when a final structured prompt is generated, not during question rounds
-    if (result.type === "suggestion") {
-      await incrementUsage(req.auth.userId, { ...meta, usageDate: today, usageCount: dailyCount });
-    }
-    
+    await incrementUsage(req.auth.userId, { ...meta, usageDate: today, usageCount: dailyCount });
     res.json(result);
   } catch (err) {
     console.error("Analyze error:", err);

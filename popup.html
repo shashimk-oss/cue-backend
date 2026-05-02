@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cue</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 280px;
+      background: #ffffff;
+      color: #111827;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+    }
+
+    .screen { display: none; flex-direction: column; }
+    .screen.active { display: flex; }
+
+    /* ── Welcome ── */
+    #screen-welcome { padding: 28px 20px 20px; align-items: center; text-align: center; }
+    .welcome-logo { width: 52px; height: 52px; margin-bottom: 16px; animation: float 3s ease-in-out infinite; }
+    @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+    .welcome-title { font-size: 20px; font-weight: 600; color: #111827; letter-spacing: -0.4px; margin-bottom: 6px; }
+    .welcome-sub { font-size: 12px; color: #6b7280; line-height: 1.6; margin-bottom: 22px; }
+    .feature-list { width: 100%; display: flex; flex-direction: column; gap: 8px; margin-bottom: 22px; text-align: left; }
+    .feature-item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 11px; background: #f9fafb; border: 1px solid #f3f4f6; border-radius: 9px; }
+    .feature-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+    .feature-text strong { display: block; font-size: 12px; font-weight: 600; color: #111827; margin-bottom: 1px; }
+    .feature-text span { font-size: 11px; color: #6b7280; line-height: 1.4; }
+
+    /* ── Auth ── */
+    #screen-auth { padding: 20px; gap: 12px; }
+    .auth-logo-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .auth-title { font-size: 15px; font-weight: 600; color: #111827; }
+    .auth-sub { font-size: 12px; color: #6b7280; line-height: 1.5; }
+    .auth-tabs { display: flex; background: #f3f4f6; border-radius: 8px; padding: 3px; gap: 2px; }
+    .auth-tab { flex: 1; padding: 6px; text-align: center; font-size: 12px; font-weight: 500; border-radius: 6px; cursor: pointer; border: none; background: transparent; color: #6b7280; transition: all 0.13s; font-family: inherit; }
+    .auth-tab.active { background: #fff; color: #111827; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .auth-form { display: flex; flex-direction: column; gap: 8px; }
+    .auth-input { width: 100%; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 9px 12px; color: #111827; font-size: 12px; font-family: inherit; outline: none; transition: all 0.15s; }
+    .auth-input:focus { border-color: #4f46e5; background: #fff; box-shadow: 0 0 0 3px rgba(79,70,229,0.08); }
+    .auth-input::placeholder { color: #9ca3af; }
+    .auth-divider { display: flex; align-items: center; gap: 8px; }
+    .auth-divider-line { flex: 1; height: 1px; background: #f3f4f6; }
+    .auth-divider-text { font-size: 11px; color: #9ca3af; }
+    .google-btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 9px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 12px; font-weight: 500; color: #374151; cursor: pointer; font-family: inherit; transition: all 0.13s; }
+    .google-btn:hover { background: #f9fafb; border-color: #d1d5db; }
+
+    /* ── Home ── */
+    #screen-home { padding: 0; }
+    .home-header { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid #f3f4f6; background: #fafafa; }
+    .home-title { font-size: 15px; font-weight: 600; color: #111827; }
+    .home-status { margin-left: auto; display: flex; align-items: center; gap: 5px; font-size: 11px; color: #059669; }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #10b981; animation: blink 2s ease-in-out infinite; }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .home-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+
+    /* Usage bar */
+    .usage-card { background: #f9fafb; border: 1px solid #f3f4f6; border-radius: 10px; padding: 11px 13px; }
+    .usage-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
+    .usage-label { font-size: 11px; color: #6b7280; }
+    .usage-count { font-size: 11px; font-weight: 600; color: #111827; }
+    .usage-bar-wrap { height: 4px; background: #e5e7eb; border-radius: 3px; overflow: hidden; margin-bottom: 7px; }
+    .usage-bar { height: 100%; background: #4f46e5; border-radius: 3px; transition: width 0.4s ease; }
+    .usage-upgrade { font-size: 11px; color: #4f46e5; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; display: none; }
+
+    /* Pro badge */
+    .pro-badge { display: flex; align-items: center; gap: 6px; padding: 8px 11px; background: #eef2ff; border: 1px solid #e0e7ff; border-radius: 9px; }
+    .pro-badge-icon { font-size: 14px; }
+    .pro-badge-text { font-size: 12px; color: #4338ca; font-weight: 500; }
+
+    .sites-label { font-size: 10px; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+    .sites-row { display: flex; gap: 5px; flex-wrap: wrap; }
+    .site-pill { font-size: 11px; padding: 3px 9px; border-radius: 20px; background: #f3f4f6; border: 1px solid #e5e7eb; color: #6b7280; }
+    .divider { height: 1px; background: #f3f4f6; }
+    .action-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 11px; border: 1px solid #f3f4f6; border-radius: 9px; cursor: pointer; transition: all 0.13s; background: #fff; }
+    .action-row:hover { background: #f9fafb; border-color: #e5e7eb; }
+    .action-left { display: flex; align-items: center; gap: 8px; }
+    .action-label { font-size: 12px; color: #374151; font-weight: 500; }
+    .action-arrow { font-size: 11px; color: #d1d5db; }
+    .home-footer { padding: 10px 16px 13px; border-top: 1px solid #f3f4f6; display: flex; justify-content: space-between; }
+    .home-footer a { font-size: 11px; color: #9ca3af; text-decoration: none; transition: color 0.13s; cursor: pointer; }
+    .home-footer a:hover { color: #4f46e5; }
+
+    /* ── Shared ── */
+    .btn-primary { width: 100%; padding: 10px; background: #4f46e5; color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    .btn-primary:hover { background: #4338ca; box-shadow: 0 2px 8px rgba(79,70,229,0.25); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+    .btn-ghost { width: 100%; padding: 9px; background: transparent; color: #6b7280; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 12px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    .btn-ghost:hover { background: #f9fafb; color: #374151; }
+    .status-msg { padding: 8px 10px; border-radius: 8px; font-size: 11px; font-weight: 500; text-align: center; display: none; }
+    .status-msg.success { display: block; background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+    .status-msg.error { display: block; background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    .status-msg.loading { display: block; background: #eef2ff; color: #4f46e5; border: 1px solid #e0e7ff; }
+  </style>
+</head>
+<body>
+
+  <!-- Welcome -->
+  <div class="screen" id="screen-welcome">
+    <svg class="welcome-logo" viewBox="0 0 32 32" fill="none">
+      <rect width="32" height="32" rx="9" fill="#4f46e5"/>
+      <circle cx="16" cy="16" r="5" fill="none" stroke="white" stroke-width="2.5"/>
+      <line x1="16" y1="7" x2="16" y2="10" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="16" y1="22" x2="16" y2="25" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="7" y1="16" x2="10" y2="16" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="22" y1="16" x2="25" y2="16" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+    </svg>
+    <h1 class="welcome-title">Meet Cue</h1>
+    <p class="welcome-sub">Real-time prompt improvements as you type.<br>Give your AI the right cue.</p>
+    <div class="feature-list">
+      <div class="feature-item">
+        <span class="feature-icon">⚡</span>
+        <div class="feature-text">
+          <strong>Instant suggestions</strong>
+          <span>Hover over the glowing underline to see an improved prompt.</span>
+        </div>
+      </div>
+      <div class="feature-item">
+        <span class="feature-icon">🎯</span>
+        <div class="feature-text">
+          <strong>Structured prompts</strong>
+          <span>Two quick questions, then a fully structured prompt following Anthropic's best practices.</span>
+        </div>
+      </div>
+      <div class="feature-item">
+        <span class="feature-icon">📊</span>
+        <div class="feature-text">
+          <strong>Quality scores</strong>
+          <span>See before and after scores so you know how much better your prompt got.</span>
+        </div>
+      </div>
+    </div>
+    <button class="btn-primary" onclick="showScreen('screen-auth')">Get started free →</button>
+  </div>
+
+  <!-- Auth -->
+  <div class="screen" id="screen-auth">
+    <div class="auth-logo-row">
+      <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
+        <rect width="32" height="32" rx="9" fill="#4f46e5"/>
+        <circle cx="16" cy="16" r="5" fill="none" stroke="white" stroke-width="2.5"/>
+        <line x1="16" y1="7" x2="16" y2="10" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="16" y1="22" x2="16" y2="25" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="7" y1="16" x2="10" y2="16" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="22" y1="16" x2="25" y2="16" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
+      <span class="auth-title">Create your account</span>
+    </div>
+    <p class="auth-sub">Free — 10 suggestions/day. No credit card needed.</p>
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tab-signup" onclick="switchTab('signup')">Sign up</button>
+      <button class="auth-tab" id="tab-signin" onclick="switchTab('signin')">Sign in</button>
+    </div>
+    <div class="auth-form">
+      <button class="google-btn" id="google-btn" onclick="authWithGoogle()">
+        <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+        Continue with Google
+      </button>
+      <div class="auth-divider">
+        <div class="auth-divider-line"></div>
+        <span class="auth-divider-text">or</span>
+        <div class="auth-divider-line"></div>
+      </div>
+      <input type="email" id="auth-email" class="auth-input" placeholder="Email address" autocomplete="email" />
+      <input type="password" id="auth-password" class="auth-input" placeholder="Password" autocomplete="current-password" />
+      <div class="status-msg" id="auth-status"></div>
+      <button class="btn-primary" id="auth-submit-btn" onclick="handleAuth()">Create free account</button>
+    </div>
+    <button class="btn-ghost" onclick="showScreen('screen-welcome')">← Back</button>
+  </div>
+
+  <!-- Home -->
+  <div class="screen" id="screen-forgot">
+  <div class="auth-top" style="padding:36px 24px 0;">
+    <div class="auth-logorow" style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid #f0f0f0;">
+      <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+        <rect width="32" height="32" rx="9" fill="#4f46e5"/>
+        <circle cx="16" cy="16" r="5" fill="none" stroke="white" stroke-width="2.5"/>
+        <line x1="16" y1="7" x2="16" y2="10" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="16" y1="22" x2="16" y2="25" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="7" y1="16" x2="10" y2="16" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="22" y1="16" x2="25" y2="16" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
+      <span style="font-size:14px;font-weight:700;color:#4f46e5;">Cue</span>
+    </div>
+    <div style="font-size:34px;font-weight:800;color:#111827;line-height:1.05;letter-spacing:-1.5px;margin-top:12px;">Reset your<br><em style="font-style:normal;color:#4f46e5;">password.</em></div>
+  </div>
+  <div class="auth-bottom">
+    <p style="font-size:12px;color:#6b7280;margin-bottom:14px;line-height:1.5;">Enter your email and we will send you a reset link.</p>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <input type="email" id="forgot-email" class="auth-input" placeholder="Email address" autocomplete="email"/>
+      <div class="status-msg" id="forgot-status"></div>
+      <button class="btn-primary" id="forgot-submit-btn">Send reset link</button>
+      <p style="text-align:center;"><a id="back-to-signin" style="font-size:11px;color:#9ca3af;cursor:pointer;text-decoration:underline;text-underline-offset:2px;">Back to sign in</a></p>
+    </div>
+  </div>
+</div>
+
+<div class="screen" id="screen-home">
+    <div class="home-header">
+      <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
+        <rect width="32" height="32" rx="9" fill="#4f46e5"/>
+        <circle cx="16" cy="16" r="5" fill="none" stroke="white" stroke-width="2.5"/>
+        <line x1="16" y1="7" x2="16" y2="10" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="16" y1="22" x2="16" y2="25" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="7" y1="16" x2="10" y2="16" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="22" y1="16" x2="25" y2="16" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
+      <span class="home-title">Cue</span>
+      <div class="home-status"><div class="status-dot"></div><span>Active</span></div>
+    </div>
+    <div class="home-body">
+
+      <!-- Usage (free users) -->
+      <div class="usage-card" id="usage-card">
+        <div class="usage-top">
+          <span class="usage-label">Today's suggestions</span>
+          <span class="usage-count" id="usage-count">— / 10</span>
+        </div>
+        <div class="usage-bar-wrap">
+          <div class="usage-bar" id="usage-bar" style="width:0%"></div>
+        </div>
+        <span class="usage-upgrade" id="usage-upgrade" onclick="handleUpgrade()">Upgrade to Pro for unlimited →</span>
+      </div>
+
+      <!-- Pro badge (pro users) -->
+      <div class="pro-badge" id="pro-badge" style="display:none">
+        <span class="pro-badge-icon">⚡</span>
+        <span class="pro-badge-text">Cue Pro — unlimited suggestions</span>
+      </div>
+
+      <div class="divider"></div>
+      <div class="sites-label">Active on</div>
+      <div class="sites-row">
+        <span class="site-pill">Claude</span>
+        <span class="site-pill">ChatGPT</span>
+        <span class="site-pill">Gemini</span>
+        <span class="site-pill">Replit</span>
+      </div>
+      <div class="divider"></div>
+      <div class="action-row" id="upgrade-row" onclick="handleUpgrade()" style="display:none">
+        <div class="action-left"><span style="font-size:13px">⚡</span><span class="action-label" style="color:#4f46e5">Upgrade to Pro — $9/mo</span></div>
+        <span class="action-arrow" style="color:#4f46e5">→</span>
+      </div>
+    </div>
+    <div class="home-footer">
+      <a href="https://console.anthropic.com" target="_blank">Anthropic console</a>
+      <a onclick="handleSignOut()">Sign out</a>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
