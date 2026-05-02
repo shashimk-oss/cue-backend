@@ -359,21 +359,28 @@ No match: {"type":"null","questionNumber":null,"question":null,"allowFile":false
   }
 
   const text = await callAnthropic([{ role: "user", content: userMsg }], systemPrompt, 2048);
-  try {
-    const clean = text.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(clean);
-    return {
-      type: parsed.type || "null",
-      questionNumber: parsed.questionNumber || null,
-      question: parsed.question || null,
-      allowFile: parsed.allowFile || false,
-      fileLabel: parsed.fileLabel || null,
-      suggestion: parsed.improved || null,
-      reason: parsed.reason || null,
-      originalScore: parsed.originalScore || null,
-      improvedScore: parsed.improvedScore || null,
-    };
-  } catch { return { type: "null", suggestion: null }; }
+  const parsed = extractJSON(text);
+  if (!parsed) return { type: "null", suggestion: null };
+  return {
+    type: parsed.type || "null",
+    questionNumber: parsed.questionNumber || null,
+    question: parsed.question || null,
+    allowFile: parsed.allowFile || false,
+    fileLabel: parsed.fileLabel || null,
+    suggestion: parsed.improved || null,
+    reason: parsed.reason || null,
+    originalScore: parsed.originalScore || null,
+    improvedScore: parsed.improvedScore || null,
+  };
+}
+
+function extractJSON(text) {
+  // Try whole response first (ideal case)
+  try { return JSON.parse(text.replace(/```json|```/g, "").trim()); } catch {}
+  // Find first { ... } block in case model added surrounding text
+  const match = text.match(/\{[\s\S]*\}/);
+  if (match) { try { return JSON.parse(match[0]); } catch {} }
+  return null;
 }
 
 app.listen(PORT, () => console.log("Cue backend running on port " + PORT));
