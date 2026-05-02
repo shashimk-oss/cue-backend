@@ -146,7 +146,12 @@ app.post("/api/analyze", requireAuth, async (req, res) => {
     }
 
     const result = await analyzePrompt(prompt, contextHistory || [], questionRound || 0, taskType || "general");
-    await incrementUsage(req.auth.userId, { ...meta, usageDate: today, usageCount: dailyCount });
+    
+    // Only count usage when a final structured prompt is generated, not during question rounds
+    if (result.type === "suggestion") {
+      await incrementUsage(req.auth.userId, { ...meta, usageDate: today, usageCount: dailyCount });
+    }
+    
     res.json(result);
   } catch (err) {
     console.error("Analyze error:", err);
