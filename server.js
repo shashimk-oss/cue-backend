@@ -373,6 +373,7 @@ Important behavior:
 - Never return null for a valid AI prompt request, no matter how short.
 - Do not show file upload unless a file would materially improve the result.
 - If upload helps, the fileLabel must be specific to the ask. Never use generic resume/CV language unless the prompt is actually about a resume, CV, hiring, recruiting, or career material.
+- For job outreach, career emails, role applications, recruiting, hiring, cover letters, or professional background questions, file upload usually helps. Allow upload and use a label like "Attach resume, LinkedIn summary, deal sheet, or role notes".
 - Questions must sound like they were written for the user's exact ask, not pulled from a canned template.
 - The generated prompt must keep Cue's structured prompt style but adapt section names and details to the ask.
 - For compound tasks, merge complementary intents into one structured prompt. If tasks truly conflict, make the prompt stepwise.
