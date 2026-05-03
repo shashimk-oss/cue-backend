@@ -367,6 +367,28 @@ Your job:
 3. Ask a personalized question when important context is missing.
 4. Generate a structured prompt when enough context exists.
 
+Prompt construction standard:
+- Build prompts using Claude-style best practices: clear and direct instructions, enough context, a domain-appropriate role, explicit constraints, and a precise output format.
+- Prefer compact execution prompts over long strategy documents. The prompt should help the downstream model complete the user's task, not teach the user how to do the task unless the user asked for a plan, rubric, critique, or strategy.
+- Use this default structure when generating improved prompts:
+  <role>One sentence naming the expert role the model should play.</role>
+  <task>One direct instruction describing exactly what to produce or do.</task>
+  <context>Only the user-provided facts and relevant constraints. Do not invent specifics.</context>
+  <instructions>Numbered or bulleted steps only when sequence or completeness matters.</instructions>
+  <constraints>Tone, length, style, exclusions, tools, sources, or implementation constraints.</constraints>
+  <output_format>Exactly what the response should contain, in the order it should appear.</output_format>
+- Adapt or omit sections when they add no value. For simple writing tasks, 4-6 concise labeled sections is usually enough.
+- Use XML-style tags when the prompt mixes instructions, source material, examples, or variable inputs. Otherwise use clean labeled sections.
+- Put long source material or extracted file context before the task instructions when source material exists.
+- Include examples only when they materially improve consistency, tone, or format. Do not add examples just to look thorough.
+- Tell the downstream model what to do, not just what to avoid. Use positive requirements.
+- Match the prompt style to the desired output. If the user wants a ready-to-send email, the generated prompt should request only subject line and email body, not a long email-writing framework.
+- For coding or tool-use tasks, explicitly state whether the model should implement, debug, explain, plan, or review. If action is desired, make the action explicit.
+- For analysis or decision tasks, specify criteria, evidence/source handling, output shape, and recommendation requirement.
+- For creative/design tasks, specify audience, goal, constraints, visual/style direction, and deliverable format without forcing generic aesthetics.
+- For career/outreach/email tasks, include recipient, role/context, sender background/proof, purpose, tone, CTA, and output format. Keep the final prompt concise and ready-to-execute.
+- The improved prompt should reduce wasted tokens: remove redundant context, avoid broad meta-instructions, and keep only details that improve the output.
+
 Important behavior:
 - The browser-provided classifier is only a weak hint. Override it whenever the raw ask suggests something better.
 - Never depend only on keyword matching. Interpret noun-first asks like "a mobile app for barbers" as real tasks.
@@ -375,7 +397,7 @@ Important behavior:
 - If upload helps, the fileLabel must be specific to the ask. Never use generic resume/CV language unless the prompt is actually about a resume, CV, hiring, recruiting, or career material.
 - For job outreach, career emails, role applications, recruiting, hiring, cover letters, or professional background questions, file upload usually helps. Allow upload and use a label like "Attach resume, LinkedIn summary, deal sheet, or role notes".
 - Questions must sound like they were written for the user's exact ask, not pulled from a canned template.
-- The generated prompt must keep Cue's structured prompt style but adapt section names and details to the ask.
+- The generated prompt must be structured but not bloated. It should be no longer than necessary for reliable execution.
 - For compound tasks, merge complementary intents into one structured prompt. If tasks truly conflict, make the prompt stepwise.
 - After two answered questions, generate the structured prompt.
 
@@ -393,7 +415,7 @@ Return ONLY valid JSON:
   "question": "personalized question or null",
   "allowFile": true or false,
   "fileLabel": "specific upload label or empty string",
-  "improved": "full structured prompt or null",
+  "improved": "concise Claude-optimized structured prompt or null",
   "reason": "short reason or null",
   "originalScore": 0-100 or null,
   "improvedScore": 0-100 or null
@@ -412,7 +434,7 @@ Return ONLY valid JSON:
   }
 
   userMsg += forceGenerate
-    ? "\nGenerate the best structured prompt now using the original ask and gathered context."
+    ? "\nGenerate the best concise, executable structured prompt now using the original ask and gathered context. Do not create a strategy guide, rubric, or teaching document unless the user explicitly asked for one."
     : "\nIf one high-impact context gap remains, ask exactly one personalized question. If enough context exists, generate the structured prompt now.";
 
   const text = await callAnthropic([{ role: "user", content: userMsg }], systemPrompt, 2048);
