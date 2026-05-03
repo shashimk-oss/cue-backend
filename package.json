@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "eval:task-shapes": "node scripts/eval-task-shapes.js"
   },
   "dependencies": {
     "@clerk/clerk-sdk-node": "^4.12.0",

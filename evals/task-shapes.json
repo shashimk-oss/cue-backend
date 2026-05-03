@@ -1,0 +1,121 @@
+[
+  {
+    "name": "career email vague",
+    "input": "help me write an email for an AE role",
+    "expectedShape": "career_email",
+    "missingSlots": ["recipient", "background", "tone", "cta"],
+    "ready": false
+  },
+  {
+    "name": "career email complete",
+    "input": "Write an email to Ryan, Head of Enterprise Sales at Anthropic, about my interest in the open AE role. I have 6 years of enterprise sales experience and closed $40M in business. Use a personable professional tone and ask for a 15-minute call.",
+    "expectedShape": "career_email",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "general email vague",
+    "input": "write an email to my manager",
+    "expectedShape": "general_email",
+    "missingSlots": ["purpose", "context", "tone", "cta"],
+    "ready": false
+  },
+  {
+    "name": "ux design vague",
+    "input": "help me design a web app",
+    "expectedShape": "ux_ui_design",
+    "missingSlots": ["user", "goal", "workflow", "constraints", "output"],
+    "ready": false
+  },
+  {
+    "name": "ux design complete",
+    "input": "Design a web app dashboard for sales managers to forecast pipeline. Include deal review, rep coaching, and forecast history screens. Make it responsive and enterprise-ready. Return a screen-by-screen UX spec with states and interaction notes.",
+    "expectedShape": "ux_ui_design",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "code build vague",
+    "input": "build a mobile app",
+    "expectedShape": "code_build",
+    "missingSlots": ["user", "stack", "requirements", "constraints", "output"],
+    "ready": false
+  },
+  {
+    "name": "code build complete",
+    "input": "Build a React Native mobile app for field sales reps using TypeScript. It should log visits, sync offline notes, and show account history. Include auth, local storage constraints, implementation steps, and code structure.",
+    "expectedShape": "code_build",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "debug vague",
+    "input": "fix this React bug",
+    "expectedShape": "debug",
+    "missingSlots": ["actual", "expected", "error"],
+    "ready": false
+  },
+  {
+    "name": "debug complete",
+    "input": "Debug this React component. Current behavior: clicking Save shows a blank modal. Expected behavior: it should show a success message. Error logs show TypeError cannot read property id. Explain the root cause and provide a patch with tests.",
+    "expectedShape": "debug",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "data analysis vague",
+    "input": "analyze this dataset",
+    "expectedShape": "data_analysis",
+    "missingSlots": ["question", "metrics", "assumptions", "format"],
+    "ready": false
+  },
+  {
+    "name": "data analysis complete",
+    "input": "Analyze this CSV dataset to understand why conversion dropped last quarter. Focus on revenue, funnel stage, region, and customer segment. Note missing data caveats and return insights with charts and recommendations.",
+    "expectedShape": "data_analysis",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "data modeling vague",
+    "input": "create a data model",
+    "expectedShape": "data_modeling",
+    "missingSlots": ["process", "entities", "relationships", "constraints", "format"],
+    "ready": false
+  },
+  {
+    "name": "data modeling complete",
+    "input": "Design a data model for a subscription billing product. Include customers, subscriptions, invoices, payments, plans, and usage events. Show relationships, foreign keys, reporting constraints, and return SQL tables plus an ERD.",
+    "expectedShape": "data_modeling",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "compare vague",
+    "input": "compare HubSpot and Salesforce",
+    "expectedShape": "compare_decide",
+    "missingSlots": ["goal", "criteria", "tradeoffs", "format"],
+    "ready": false
+  },
+  {
+    "name": "compare complete",
+    "input": "Compare HubSpot and Salesforce for a 40-person B2B sales team choosing a CRM. Criteria are cost, enterprise reporting, integrations, ease of admin, and scalability. Prioritize implementation risk and return a scorecard with recommendation.",
+    "expectedShape": "compare_decide",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "plan vague",
+    "input": "plan a product launch",
+    "expectedShape": "plan_strategy",
+    "missingSlots": ["timeframe", "constraints", "detail", "success"],
+    "ready": false
+  },
+  {
+    "name": "plan complete",
+    "input": "Create a launch plan for a B2B analytics product over 8 weeks. Account for a small marketing team, sales enablement dependencies, limited budget, milestones, checklist detail, and success metrics around pipeline and activation.",
+    "expectedShape": "plan_strategy",
+    "missingSlots": [],
+    "ready": true
+  }
+]
