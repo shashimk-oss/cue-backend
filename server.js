@@ -8,6 +8,7 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const crypto = require("crypto");
 const { Pool } = require("pg");
 const { Resend } = require("resend");
+const { detectTaskShape, scoreTaskShape } = require("./lib/task-shapes");
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 const app = express();
@@ -315,7 +316,129 @@ function normalizeCoreIntent(intent) {
   return CORE_INTENTS.includes(normalized) ? normalized : "unknown";
 }
 
-function buildFallbackResponse(prompt, browserIntent, questionRound) {
+const SHAPE_UPLOAD_LABELS = {
+  career_email: "Upload file",
+  general_email: "Upload file",
+  ux_ui_design: "Upload file",
+  code_build: "Upload file",
+  debug: "Upload file",
+  data_analysis: "Upload file",
+  data_modeling: "Upload file",
+  compare_decide: "Upload file",
+  sql_database: "Upload file",
+  product_prd: "Upload file",
+  marketing_copy: "Upload file",
+  legal_policy: "Upload file",
+  finance_modeling: "Upload file",
+  ops_process: "Upload file",
+  hiring_interview: "Upload file",
+  customer_support: "Upload file",
+  sales_strategy: "Upload file",
+  content_social: "Upload file",
+  summarize: "Upload file",
+  explain_teach: "Upload file",
+  plan_strategy: "Upload file"
+};
+
+const SLOT_QUESTION_COPY = {
+  intent: "What do you want the final output to do?",
+  recipient: "Who is this for, and what should they know about the situation?",
+  role: "What exact role, title, product, or object should Cue reference?",
+  purpose: "What is the purpose or outcome you want?",
+  background: "What background, proof points, examples, or source material should be included?",
+  tone: "What tone should the output use?",
+  cta: "What exact next step should the output ask for?",
+  context: "What key context should the model know before answering?",
+  artifact: "What exact artifact should be designed or produced?",
+  user: "Who is the target user or audience?",
+  goal: "What goal should the output optimize for?",
+  workflow: "What workflow, screens, or process should be covered?",
+  constraints: "What constraints, tools, style rules, risks, or requirements matter?",
+  output: "What output format would make the answer immediately usable?",
+  deliverable: "What final deliverable do you want?",
+  stack: "What tech stack, platform, or environment should be assumed?",
+  requirements: "What must the solution include or be able to do?",
+  actual: "What is happening now?",
+  expected: "What should happen instead?",
+  error: "What error, logs, screenshots, or symptoms can you share?",
+  source: "What source material, dataset, document, or notes should be used?",
+  question: "What specific question should the analysis answer?",
+  metrics: "Which metrics, dimensions, or success measures matter most?",
+  assumptions: "What assumptions, caveats, filters, or timeframe should be respected?",
+  format: "What format should Cue produce?",
+  process: "What business process or product is this for?",
+  entities: "Which entities, objects, tables, or concepts must be represented?",
+  relationships: "How do those entities relate to each other?",
+  options: "What options should be compared?",
+  tradeoffs: "Which trade-offs, priorities, or risks should drive the decision?",
+  schema: "What tables, fields, or schema should be used?",
+  filters: "What filters, joins, dates, or edge cases should the query account for?",
+  dialect: "Which SQL dialect or database should be targeted?",
+  feature: "What feature or product area is this for?",
+  users: "Who are the users or personas?",
+  problem: "What problem, pain, or opportunity should this address?",
+  message: "What message, positioning, or value proposition should come through?",
+  voice: "What voice or style should this use?",
+  document: "What document, policy, contract, or clause should be reviewed?",
+  risks: "Which risks, clauses, or failure points should Cue focus on?",
+  model: "What model, forecast, or financial analysis should be built?",
+  decision: "What decision should this analysis support?",
+  inputs: "What assumptions or inputs should be used?",
+  stakeholders: "Who are the stakeholders, owners, or teams involved?",
+  issue: "What issue or request should be addressed?",
+  customer: "What customer context matters?",
+  policy: "What policy, product rule, or internal guidance should be followed?",
+  resolution: "What resolution or next step should be offered?",
+  account: "Which account, prospect, or customer is this for?",
+  asset: "What asset should Cue create?",
+  audience: "Who is the audience?",
+  topic: "What topic or message should it cover?",
+  focus: "What should the summary focus on?",
+  length: "How long or detailed should it be?",
+  concept: "What concept should be explained?",
+  scope: "What depth or scope should the explanation cover?",
+  examples: "What examples, analogies, or scenarios should be used?",
+  timeframe: "What timeframe should the plan cover?",
+  detail: "How detailed should the plan be?",
+  success: "What does success look like?"
+};
+
+function buildShapeFallbackResponse(taskScore, questionRound) {
+  if (!taskScore || !taskScore.shape) return null;
+  const missingSlotId = taskScore.missing[0];
+  if (!missingSlotId) {
+    return {
+      type: "suggestion",
+      questionNumber: null,
+      question: null,
+      allowFile: false,
+      fileLabel: "",
+      suggestion: taskScore.shape.scaffold,
+      reason: `Structured around ${taskScore.shape.label}.`,
+      originalScore: Math.round((taskScore.score / taskScore.maxScore) * 100),
+      improvedScore: 85,
+    };
+  }
+
+  const slot = taskScore.shape.requiredSlots.find((item) => item.id === missingSlotId);
+  const label = slot?.label || "Missing context";
+  return {
+    type: "question",
+    questionNumber: Math.min((questionRound || 0) + 1, 2),
+    question: SLOT_QUESTION_COPY[missingSlotId] || `What should Cue know about ${label.toLowerCase()}?`,
+    allowFile: ["background", "source", "schema", "document", "inputs", "context", "requirements", "error"].includes(missingSlotId),
+    fileLabel: SHAPE_UPLOAD_LABELS[taskScore.shape.id] || "Upload file",
+    suggestion: null,
+    reason: `${label} is the highest-impact missing context for ${taskScore.shape.label}.`,
+    originalScore: Math.round((taskScore.score / taskScore.maxScore) * 100),
+    improvedScore: null,
+  };
+}
+
+function buildFallbackResponse(prompt, browserIntent, questionRound, taskScore = null) {
+  const shapeFallback = buildShapeFallbackResponse(taskScore, questionRound);
+  if (shapeFallback) return shapeFallback;
+
   const text = prompt.toLowerCase();
   let intent = normalizeCoreIntent(browserIntent);
 
@@ -353,6 +476,8 @@ async function analyzePrompt(prompt, contextHistory, questionRound, domain, prim
     secondary_intents: Array.isArray(secondary_intents) ? secondary_intents : [],
     intent_confidence: typeof intent_confidence === "number" ? intent_confidence : 0
   };
+  const taskShapeId = detectTaskShape(trimmed);
+  const taskScore = scoreTaskShape(trimmed, taskShapeId);
 
   const systemPrompt = `You are Cue's adaptive prompt intelligence engine.
 
@@ -364,8 +489,9 @@ Your job:
    - specific_action: the user's actual operation in plain language, with no taxonomy limit.
    - deliverable: what the user wants produced.
    - missing_context: the highest-impact missing information.
-3. Ask a personalized question when important context is missing.
-4. Generate a structured prompt when enough context exists.
+3. Use Cue's tested task-shape context to identify what an expert in that scenario would need.
+4. Ask a personalized question when important context is missing.
+5. Generate a structured prompt when enough context exists.
 
 Cue success criteria:
 Universal prompt-quality criteria:
@@ -418,6 +544,8 @@ Prompt construction standard:
 
 Important behavior:
 - The browser-provided classifier is only a weak hint. Override it whenever the raw ask suggests something better.
+- The task-shape registry is a tested expert heuristic, not a hard limit. Use it to avoid generic questions, but override it when the raw ask clearly needs something else.
+- The task-shape missing slots identify likely high-impact context gaps. Prefer asking about the highest-impact missing slot unless the raw ask reveals a better question.
 - Never depend only on keyword matching. Interpret noun-first asks like "a mobile app for barbers" as real tasks.
 - Never return null for a valid AI prompt request, no matter how short.
 - Do not show file upload unless a file would materially improve the result.
@@ -450,6 +578,17 @@ Return ONLY valid JSON:
 
   let userMsg = `<original_prompt>${trimmed}</original_prompt>\n`;
   userMsg += `<browser_hint>${JSON.stringify(browserHint)}</browser_hint>\n`;
+  userMsg += `<task_shape>${JSON.stringify({
+    id: taskScore.shape.id,
+    label: taskScore.shape.label,
+    score: taskScore.score,
+    maxScore: taskScore.maxScore,
+    present: taskScore.present,
+    missing: taskScore.missing,
+    ready: taskScore.ready,
+    scaffold: taskScore.shape.scaffold,
+    requiredSlots: taskScore.shape.requiredSlots.map((slot) => ({ id: slot.id, label: slot.label, weight: slot.weight }))
+  })}</task_shape>\n`;
   userMsg += `<question_round>${questionRound || 0}</question_round>\n`;
 
   if (contextHistory.length > 0) {
@@ -468,12 +607,12 @@ Return ONLY valid JSON:
   const parsed = extractJSON(text);
 
   if (!parsed || parsed.type === "null") {
-    return buildFallbackResponse(trimmed, browserHint.primary_intent, questionRound);
+    return buildFallbackResponse(trimmed, browserHint.primary_intent, questionRound, taskScore);
   }
 
   const type = parsed.type === "suggestion" ? "suggestion" : "question";
   const normalizedIntent = normalizeCoreIntent(parsed.classification?.core_intent || browserHint.primary_intent);
-  const fallback = buildFallbackResponse(trimmed, normalizedIntent, questionRound);
+  const fallback = buildFallbackResponse(trimmed, normalizedIntent, questionRound, taskScore);
   const questionNumber = type === "question"
     ? (parsed.questionNumber || Math.min((questionRound || 0) + 1, 2))
     : null;

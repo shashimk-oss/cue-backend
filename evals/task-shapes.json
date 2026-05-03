@@ -3,7 +3,12 @@
     "name": "career email vague",
     "input": "help me write an email for an AE role",
     "expectedShape": "career_email",
-    "missingSlots": ["recipient", "background", "tone", "cta"],
+    "missingSlots": [
+      "recipient",
+      "background",
+      "tone",
+      "cta"
+    ],
     "ready": false
   },
   {
@@ -17,14 +22,25 @@
     "name": "general email vague",
     "input": "write an email to my manager",
     "expectedShape": "general_email",
-    "missingSlots": ["purpose", "context", "tone", "cta"],
+    "missingSlots": [
+      "purpose",
+      "context",
+      "tone",
+      "cta"
+    ],
     "ready": false
   },
   {
     "name": "ux design vague",
     "input": "help me design a web app",
     "expectedShape": "ux_ui_design",
-    "missingSlots": ["user", "goal", "workflow", "constraints", "output"],
+    "missingSlots": [
+      "user",
+      "goal",
+      "workflow",
+      "constraints",
+      "output"
+    ],
     "ready": false
   },
   {
@@ -38,7 +54,13 @@
     "name": "code build vague",
     "input": "build a mobile app",
     "expectedShape": "code_build",
-    "missingSlots": ["user", "stack", "requirements", "constraints", "output"],
+    "missingSlots": [
+      "user",
+      "stack",
+      "requirements",
+      "constraints",
+      "output"
+    ],
     "ready": false
   },
   {
@@ -52,7 +74,11 @@
     "name": "debug vague",
     "input": "fix this React bug",
     "expectedShape": "debug",
-    "missingSlots": ["actual", "expected", "error"],
+    "missingSlots": [
+      "actual",
+      "expected",
+      "error"
+    ],
     "ready": false
   },
   {
@@ -66,7 +92,12 @@
     "name": "data analysis vague",
     "input": "analyze this dataset",
     "expectedShape": "data_analysis",
-    "missingSlots": ["question", "metrics", "assumptions", "format"],
+    "missingSlots": [
+      "question",
+      "metrics",
+      "assumptions",
+      "format"
+    ],
     "ready": false
   },
   {
@@ -80,7 +111,13 @@
     "name": "data modeling vague",
     "input": "create a data model",
     "expectedShape": "data_modeling",
-    "missingSlots": ["process", "entities", "relationships", "constraints", "format"],
+    "missingSlots": [
+      "process",
+      "entities",
+      "relationships",
+      "constraints",
+      "format"
+    ],
     "ready": false
   },
   {
@@ -94,7 +131,12 @@
     "name": "compare vague",
     "input": "compare HubSpot and Salesforce",
     "expectedShape": "compare_decide",
-    "missingSlots": ["goal", "criteria", "tradeoffs", "format"],
+    "missingSlots": [
+      "goal",
+      "criteria",
+      "tradeoffs",
+      "format"
+    ],
     "ready": false
   },
   {
@@ -108,13 +150,248 @@
     "name": "plan vague",
     "input": "plan a product launch",
     "expectedShape": "plan_strategy",
-    "missingSlots": ["timeframe", "constraints", "detail", "success"],
+    "missingSlots": [
+      "timeframe",
+      "constraints",
+      "detail",
+      "success"
+    ],
     "ready": false
   },
   {
     "name": "plan complete",
     "input": "Create a launch plan for a B2B analytics product over 8 weeks. Account for a small marketing team, sales enablement dependencies, limited budget, milestones, checklist detail, and success metrics around pipeline and activation.",
     "expectedShape": "plan_strategy",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "sql vague",
+    "input": "write a SQL query",
+    "expectedShape": "sql_database",
+    "missingSlots": [
+      "goal",
+      "schema",
+      "filters",
+      "dialect",
+      "output"
+    ],
+    "ready": false
+  },
+  {
+    "name": "sql complete",
+    "input": "Write a Postgres SQL query to calculate monthly active users from users and events tables. Join on user_id, filter to active status in the last 90 days, group by month, and explain the query.",
+    "expectedShape": "sql_database",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "product prd vague",
+    "input": "create a PRD for a new feature",
+    "expectedShape": "product_prd",
+    "missingSlots": [
+      "users",
+      "problem",
+      "requirements",
+      "constraints",
+      "metrics"
+    ],
+    "ready": false
+  },
+  {
+    "name": "product prd complete",
+    "input": "Create a PRD for a saved filters feature for sales managers. The problem is reps waste time rebuilding pipeline views. Include user stories, acceptance criteria, timeline constraints, analytics dependencies, and activation success metrics.",
+    "expectedShape": "product_prd",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "marketing copy vague",
+    "input": "write landing page copy",
+    "expectedShape": "marketing_copy",
+    "missingSlots": [
+      "audience",
+      "goal",
+      "message",
+      "voice",
+      "format"
+    ],
+    "ready": false
+  },
+  {
+    "name": "marketing copy complete",
+    "input": "Write landing page copy for RevOps leaders to book a demo. Position the product around faster pipeline inspection and cleaner forecasting. Use a confident enterprise voice and return three hero variants plus section copy.",
+    "expectedShape": "marketing_copy",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "legal policy vague",
+    "input": "review this contract",
+    "expectedShape": "legal_policy",
+    "missingSlots": [
+      "risks",
+      "context",
+      "format"
+    ],
+    "ready": false
+  },
+  {
+    "name": "legal policy complete",
+    "input": "Review this enterprise SaaS contract for negotiation risk. Focus on liability, termination, data privacy, indemnity, and security clauses. Consider B2B vendor context and return a table of issues with suggested revisions.",
+    "expectedShape": "legal_policy",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "finance vague",
+    "input": "build a revenue forecast",
+    "expectedShape": "finance_modeling",
+    "missingSlots": [
+      "decision",
+      "inputs",
+      "metrics",
+      "format"
+    ],
+    "ready": false
+  },
+  {
+    "name": "finance complete",
+    "input": "Build a revenue forecast for deciding next year's hiring plan. Use assumptions for growth, churn, CAC, conversion, margin, and runway. Evaluate base, upside, and downside scenarios and return a table with recommendation.",
+    "expectedShape": "finance_modeling",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "ops process vague",
+    "input": "create an onboarding SOP",
+    "expectedShape": "ops_process",
+    "missingSlots": [
+      "stakeholders",
+      "constraints",
+      "risks"
+    ],
+    "ready": false
+  },
+  {
+    "name": "ops process complete",
+    "input": "Create an onboarding SOP for new enterprise customers. Account for sales, support, CSM owners, SLA constraints, CRM tooling, handoff risks, escalation failure points, and return a checklist playbook.",
+    "expectedShape": "ops_process",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "hiring vague",
+    "input": "make an interview scorecard",
+    "expectedShape": "hiring_interview",
+    "missingSlots": [
+      "role",
+      "skills",
+      "criteria"
+    ],
+    "ready": false
+  },
+  {
+    "name": "hiring complete",
+    "input": "Create an interview scorecard for a senior product designer role. Evaluate UX craft, systems thinking, collaboration, and product judgment. Include criteria, questions, scoring rubric, and table format.",
+    "expectedShape": "hiring_interview",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "support vague",
+    "input": "write a support reply",
+    "expectedShape": "customer_support",
+    "missingSlots": [
+      "issue",
+      "customer",
+      "policy",
+      "tone",
+      "resolution"
+    ],
+    "ready": false
+  },
+  {
+    "name": "support complete",
+    "input": "Write a customer support reply for an enterprise customer complaining about a refund issue. Reference our refund policy, use an empathetic but firm tone, explain the next step, and offer escalation if needed.",
+    "expectedShape": "customer_support",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "sales strategy vague",
+    "input": "help with deal strategy",
+    "expectedShape": "sales_strategy",
+    "missingSlots": [
+      "account",
+      "goal",
+      "context",
+      "constraints",
+      "format"
+    ],
+    "ready": false
+  },
+  {
+    "name": "sales strategy complete",
+    "input": "Create a sales strategy for Acme to advance a renewal deal. Use deal context from CRM, stakeholder pain, budget timing, competitor risk, procurement blocker, and return a talk track with discovery questions and next steps.",
+    "expectedShape": "sales_strategy",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "content vague",
+    "input": "write a LinkedIn post",
+    "expectedShape": "content_social",
+    "missingSlots": [
+      "audience",
+      "topic",
+      "voice",
+      "format"
+    ],
+    "ready": false
+  },
+  {
+    "name": "content complete",
+    "input": "Write a LinkedIn post for founders about the topic of reducing AI token waste. Use a sharp educational voice, include a hook and key points, and return three variants under 120 words.",
+    "expectedShape": "content_social",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "summarize vague",
+    "input": "summarize this report",
+    "expectedShape": "summarize",
+    "missingSlots": [
+      "audience",
+      "focus",
+      "length",
+      "format"
+    ],
+    "ready": false
+  },
+  {
+    "name": "summarize complete",
+    "input": "Summarize this report for executives. Focus on key points, risks, decisions, and action items. Keep it concise and return bullets plus a short memo summary.",
+    "expectedShape": "summarize",
+    "missingSlots": [],
+    "ready": true
+  },
+  {
+    "name": "explain vague",
+    "input": "explain tokenization",
+    "expectedShape": "explain_teach",
+    "missingSlots": [
+      "audience",
+      "scope",
+      "examples",
+      "format"
+    ],
+    "ready": false
+  },
+  {
+    "name": "explain complete",
+    "input": "Explain tokenization to a nontechnical beginner. Give a brief overview, focus on how text becomes tokens, use a simple analogy and example, and return step-by-step bullets.",
+    "expectedShape": "explain_teach",
     "missingSlots": [],
     "ready": true
   }
