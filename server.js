@@ -261,134 +261,180 @@ async function extractFileContext(fileData, fileType) {
   return { extracted: data.content?.[0]?.text || "" };
 }
 
-// ── Intent-aware templates ────────────────────────────────────────────────
+// ── Adaptive prompt intelligence engine ───────────────────────────────────
 
-const INTENT_QUESTIONS = {
-  create:        { q1: "Who is the audience and what outcome should this achieve?",            q1file: false, q1label: "",                               q2: "What tone and format do you want?",                                             q2file: true,  q2label: "Attach a reference or brief" },
-  transform:     { q1: "What specifically needs changing — tone, structure, or content?",      q1file: true,  q1label: "Attach the original",            q2: "Who is the intended reader and what should the result feel like?",              q2file: false, q2label: "" },
-  analyze:       { q1: "What specific question are you trying to answer?",                     q1file: true,  q1label: "Attach data or documents",       q2: "What output format do you need — bullets, table, or narrative?",               q2file: false, q2label: "" },
-  research:      { q1: "What specific question or hypothesis are you trying to validate?",     q1file: false, q1label: "",                               q2: "What sources or constraints should I focus on?",                               q2file: true,  q2label: "Attach relevant documents" },
-  summarize:     { q1: "What is the most important thing the summary needs to capture?",       q1file: true,  q1label: "Attach the document to summarize", q2: "How long should it be and for what audience?",                               q2file: false, q2label: "" },
-  extract:       { q1: "What specific information do you need extracted?",                     q1file: true,  q1label: "Attach the source document",     q2: "What format should the extracted data be in?",                                 q2file: false, q2label: "" },
-  classify:      { q1: "What categories or criteria should be used?",                          q1file: true,  q1label: "Attach items to classify",       q2: "What should the output structure look like?",                                  q2file: false, q2label: "" },
-  compare:       { q1: "What criteria matter most for this comparison?",                       q1file: false, q1label: "",                               q2: "What decision or outcome does this comparison support?",                        q2file: false, q2label: "" },
-  plan:          { q1: "What is the timeframe and what are the key constraints?",              q1file: false, q1label: "",                               q2: "How detailed should this be — high-level milestones or step-by-step?",         q2file: false, q2label: "" },
-  critique:      { q1: "What aspects should the critique focus on?",                           q1file: true,  q1label: "Attach the work to critique",    q2: "Who is the intended audience for this feedback?",                              q2file: false, q2label: "" },
-  optimize:      { q1: "What specific metric or outcome do you want to improve?",              q1file: true,  q1label: "Attach the current version",     q2: "What constraints or trade-offs should be respected?",                          q2file: false, q2label: "" },
-  explain:       { q1: "What is the background level of the audience — beginner or expert?",   q1file: false, q1label: "",                               q2: "What aspect is most confusing or needs the most depth?",                       q2file: true,  q2label: "Attach related material" },
-  generate_code: { q1: "What is the tech stack and what exactly should this code do?",         q1file: true,  q1label: "Attach existing code or spec",   q2: "Are there constraints — performance, style, or dependencies?",                 q2file: false, q2label: "" },
-  debug:         { q1: "What is the current behaviour and what should it do instead?",         q1file: true,  q1label: "Attach a screenshot of the error", q2: "What is the tech stack and any relevant error messages?",                   q2file: false, q2label: "" },
-  ideate:        { q1: "What problem are you solving and who is it for?",                      q1file: false, q1label: "",                               q2: "Are there any constraints or directions to avoid?",                            q2file: false, q2label: "" },
-  decide:        { q1: "What are the options and what criteria matter most?",                  q1file: false, q1label: "",                               q2: "What trade-offs are you most concerned about?",                                q2file: false, q2label: "" },
+const CORE_INTENTS = [
+  "create", "transform", "analyze", "research", "summarize", "extract",
+  "classify", "compare", "plan", "critique", "optimize", "explain",
+  "generate_code", "debug", "ideate", "decide"
+];
+
+const FALLBACK_QUESTIONS = {
+  create: "Who is this for, and what should the finished result help them do?",
+  transform: "What should change, what should stay, and who is the result for?",
+  analyze: "What question should the analysis answer, and what angles matter most?",
+  research: "What exactly should be researched, and what sources or limits should guide it?",
+  summarize: "What source should be summarized, and what should the summary emphasize?",
+  extract: "What information should be pulled out, and what format should it be returned in?",
+  classify: "What items need categorizing, and what categories or criteria should be used?",
+  compare: "What options should be compared, and what criteria matter most?",
+  plan: "What is the goal, timeframe, and biggest constraint?",
+  critique: "What should be reviewed, and what kind of feedback would be most useful?",
+  optimize: "What outcome should improve, and what trade-offs should be respected?",
+  explain: "Who is the explanation for, and how deep should it go?",
+  generate_code: "What should the code do, and what tech stack or platform should it use?",
+  debug: "What is happening now, what should happen instead, and what error or code can you share?",
+  ideate: "What problem are you solving, who is it for, and what constraints should ideas respect?",
+  decide: "What options are you choosing between, and what criteria should decide the winner?",
+  unknown: "What outcome do you want, who is it for, and what constraints should Cue respect?"
 };
 
-const INTENT_PROMPT_TEMPLATES = {
-  create:        "Role → Task → Audience → Tone → Format → Constraints → Success criteria",
-  transform:     "Role → Original content → Transformation goal → Audience → Tone → Format → What to preserve",
-  analyze:       "Role → Data/context → Analysis dimensions → Key question → Output format → Constraints → Deliverable",
-  research:      "Role → Research question → Scope → Sources → Methodology → Output format → Deliverable",
-  summarize:     "Role → Source material → Key focus → Audience → Length → Format → What to omit",
-  extract:       "Role → Source material → What to extract → Format → Output structure → Edge cases → Deliverable",
-  classify:      "Role → Items → Categories → Criteria → Output format → Edge cases → Deliverable",
-  compare:       "Role → Items to compare → Criteria → Weights → Output format → Recommendation requirement → Deliverable",
-  plan:          "Role → Goal → Timeframe → Constraints → Level of detail → Format → Success criteria",
-  critique:      "Role → Work to critique → Focus areas → Audience → Tone → Format → Actionability",
-  optimize:      "Role → Current state → Target metric → Constraints → Trade-offs → Output format → Success criteria",
-  explain:       "Role → Concept → Audience level → Depth → Analogies → Format → Examples",
-  generate_code: "Role → Task → Tech stack → Requirements → Constraints → Style → Output format",
-  debug:         "Role → Code/system → Current behaviour → Expected behaviour → Error messages → Tech stack → Fix requirements",
-  ideate:        "Role → Problem → Audience → Constraints → Quantity → Format → Evaluation criteria",
-  decide:        "Role → Options → Criteria → Weights → Constraints → Format → Recommendation requirement",
+const FALLBACK_FILE_LABELS = {
+  create: "Attach a reference, brief, or example",
+  transform: "Attach the original content",
+  analyze: "Attach data, notes, or source material",
+  research: "Attach relevant documents or source material",
+  summarize: "Attach the document to summarize",
+  extract: "Attach the source document",
+  classify: "Attach the items to classify",
+  compare: "Attach options, requirements, or notes",
+  plan: "Attach requirements, notes, or constraints",
+  critique: "Attach the work to review",
+  optimize: "Attach the current version or metrics",
+  explain: "Attach related material",
+  generate_code: "Attach existing code, specs, or wireframes",
+  debug: "Attach code, logs, screenshots, or error output",
+  ideate: "Attach a brief, notes, or examples",
+  decide: "Attach options, notes, or requirements",
+  unknown: "Attach helpful context"
 };
 
-const DOMAIN_MODIFIERS = {
-  email:    "Include a subject line. Keep language professional yet appropriately warm.",
-  coding:   "Include language and framework context. Prefer working, runnable examples.",
-  research: "Distinguish facts from inference. Note where sources should be cited.",
-  sales:    "Frame around customer value and outcomes. Be specific about ROI.",
-  general:  "",
-};
+function normalizeCoreIntent(intent) {
+  if (!intent || typeof intent !== "string") return "unknown";
+  const normalized = intent.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return CORE_INTENTS.includes(normalized) ? normalized : "unknown";
+}
+
+function buildFallbackResponse(prompt, browserIntent, questionRound) {
+  const text = prompt.toLowerCase();
+  let intent = normalizeCoreIntent(browserIntent);
+
+  if (intent === "unknown") {
+    if (/\b(fix|bug|error|crash|broken|debug|traceback|stack)\b/.test(text)) intent = "debug";
+    else if (/\b(code|implement|app|component|api|script|function|website|webpage)\b/.test(text)) intent = "generate_code";
+    else if (/\b(compare|versus|vs\.?|better|choose|recommend)\b/.test(text)) intent = "compare";
+    else if (/\b(plan|roadmap|schedule|strategy|outline)\b/.test(text)) intent = "plan";
+    else if (/\b(analyze|insight|evaluate|assess)\b/.test(text)) intent = "analyze";
+    else if (/\b(explain|teach|what is|how does|why does)\b/.test(text)) intent = "explain";
+    else intent = "create";
+  }
+
+  return {
+    type: "question",
+    questionNumber: Math.min((questionRound || 0) + 1, 2),
+    question: FALLBACK_QUESTIONS[intent] || FALLBACK_QUESTIONS.unknown,
+    allowFile: ["transform", "analyze", "summarize", "extract", "classify", "critique", "optimize", "generate_code", "debug"].includes(intent),
+    fileLabel: FALLBACK_FILE_LABELS[intent] || FALLBACK_FILE_LABELS.unknown,
+    suggestion: null,
+    reason: null,
+    originalScore: null,
+    improvedScore: null,
+  };
+}
 
 async function analyzePrompt(prompt, contextHistory, questionRound, domain, primary_intent, secondary_intents, intent_confidence) {
-  if (prompt.trim().length < 10) return { type: "null", suggestion: null };
+  const trimmed = (prompt || "").trim();
+  if (trimmed.length < 5) return { type: "null", suggestion: null };
 
   const forceGenerate = questionRound >= 2;
-  const lowConfidence = !primary_intent || intent_confidence < 0.4;
+  const browserHint = {
+    domain: domain || "unknown",
+    primary_intent: primary_intent || "unknown",
+    secondary_intents: Array.isArray(secondary_intents) ? secondary_intents : [],
+    intent_confidence: typeof intent_confidence === "number" ? intent_confidence : 0
+  };
 
-  // Fall back to a general template when confidence is too low
-  const intent = lowConfidence ? null : primary_intent;
-  const q = intent ? INTENT_QUESTIONS[intent] : INTENT_QUESTIONS.create;
-  const template = intent ? INTENT_PROMPT_TEMPLATES[intent] : INTENT_PROMPT_TEMPLATES.create;
-  const domainMod = DOMAIN_MODIFIERS[domain] || "";
+  const systemPrompt = `You are Cue's adaptive prompt intelligence engine.
 
-  // Build secondary intent note for multi-intent prompts
-  const secondaryNote = secondary_intents?.length
-    ? `Secondary intents detected: ${secondary_intents.join(", ")}. If complementary, merge into one prompt. If conflicting, note stepwise execution in the reason field.`
-    : "";
+Your job:
+1. Classify the user's raw ask without being limited by predefined verbs, domains, industries, writing styles, or task shapes.
+2. Infer:
+   - open_domain: the real subject area in natural language, e.g. "mobile app product design", "enterprise sales email", "React debugging", "medical literature review".
+   - core_intent: one of ${CORE_INTENTS.join(", ")}. This is a routing label only.
+   - specific_action: the user's actual operation in plain language, with no taxonomy limit.
+   - deliverable: what the user wants produced.
+   - missing_context: the highest-impact missing information.
+3. Ask a personalized question when important context is missing.
+4. Generate a structured prompt when enough context exists.
 
-  const intentLine = intent
-    ? `Primary intent: ${intent.toUpperCase()}\nPrompt template to follow: ${template}`
-    : `Intent unclear — determine the best intent from the prompt and pick appropriate questions.`;
+Important behavior:
+- The browser-provided classifier is only a weak hint. Override it whenever the raw ask suggests something better.
+- Never depend only on keyword matching. Interpret noun-first asks like "a mobile app for barbers" as real tasks.
+- Never return null for a valid AI prompt request, no matter how short.
+- Do not show file upload unless a file would materially improve the result.
+- If upload helps, the fileLabel must be specific to the ask. Never use generic resume/CV language unless the prompt is actually about a resume, CV, hiring, recruiting, or career material.
+- Questions must sound like they were written for the user's exact ask, not pulled from a canned template.
+- The generated prompt must keep Cue's structured prompt style but adapt section names and details to the ask.
+- For compound tasks, merge complementary intents into one structured prompt. If tasks truly conflict, make the prompt stepwise.
+- After two answered questions, generate the structured prompt.
 
-  const systemPrompt = `You are an expert prompt engineer specialising in structured prompt construction.
-Domain: ${(domain || "general").toUpperCase()}
-${intentLine}
-${domainMod ? `Domain modifier: ${domainMod}` : ""}
-${secondaryNote}
+Return ONLY valid JSON:
+{
+  "type": "question" | "suggestion" | "null",
+  "classification": {
+    "open_domain": "natural language domain",
+    "core_intent": "one of the core intents",
+    "specific_action": "open-ended action",
+    "secondary_actions": ["0-2 open-ended actions"],
+    "confidence": 0.0-1.0
+  },
+  "questionNumber": 1 or 2 or null,
+  "question": "personalized question or null",
+  "allowFile": true or false,
+  "fileLabel": "specific upload label or empty string",
+  "improved": "full structured prompt or null",
+  "reason": "short reason or null",
+  "originalScore": 0-100 or null,
+  "improvedScore": 0-100 or null
+}`;
 
-Your job is to ALWAYS either ask a question or generate a structured prompt. Never return null unless the input is pure gibberish or completely off-topic (not an AI prompt at all).
+  let userMsg = `<original_prompt>${trimmed}</original_prompt>\n`;
+  userMsg += `<browser_hint>${JSON.stringify(browserHint)}</browser_hint>\n`;
+  userMsg += `<question_round>${questionRound || 0}</question_round>\n`;
 
-Decision rules:
-1. If the prompt lacks key context (audience, goal, tone, constraints) → ask Q1 to gather it.
-2. If Q1 has been answered but more detail would help → ask Q2.
-3. If enough context exists → generate the full structured prompt.
-4. NEVER return null for anything that resembles an AI prompt request, however short.
-
-Q1: ${q.q1}${q.q1file ? ` (allow file upload: ${q.q1label})` : ""}
-Q2: ${q.q2}${q.q2file ? ` (allow file upload: ${q.q2label})` : ""}
-
-${forceGenerate ? "OVERRIDE: The user has answered enough questions. Generate the full structured prompt NOW." : ""}
-
-Return ONLY valid JSON — no markdown, no explanation:
-Question: {"type":"question","questionNumber":1,"question":"...","allowFile":true/false,"fileLabel":"...","improved":null,"reason":null,"originalScore":0-100,"improvedScore":null}
-Suggestion: {"type":"suggestion","questionNumber":null,"question":null,"allowFile":false,"fileLabel":"","improved":"full structured prompt","reason":"one sentence why this is better","originalScore":0-100,"improvedScore":0-100}
-Null (only for pure gibberish/off-topic): {"type":"null","questionNumber":null,"question":null,"allowFile":false,"fileLabel":"","improved":null,"reason":null,"originalScore":null,"improvedScore":null}`;
-
-  let userMsg = `<original_prompt>${prompt}</original_prompt>\n<domain>${domain || "general"}</domain>\n<intent>${intent || "unknown"}</intent>\n`;
   if (contextHistory.length > 0) {
     userMsg += "\n<context_gathered>\n";
-    contextHistory.forEach((t, i) => { userMsg += `Q${i+1}: ${t.question}\nA${i+1}: ${t.answer}\n\n`; });
-    userMsg += "</context_gathered>\n\n";
-    userMsg += forceGenerate ? "Build the complete structured prompt now." : `Ask question ${contextHistory.length + 1}.`;
-  } else {
-    userMsg += "\nCheck if the prompt needs more context. If so, ask Q1. If it already has enough context, generate the structured prompt directly.";
+    contextHistory.forEach((t, i) => {
+      userMsg += `Q${i + 1}: ${t.question}\nA${i + 1}: ${t.answer}\n\n`;
+    });
+    userMsg += "</context_gathered>\n";
   }
+
+  userMsg += forceGenerate
+    ? "\nGenerate the best structured prompt now using the original ask and gathered context."
+    : "\nIf one high-impact context gap remains, ask exactly one personalized question. If enough context exists, generate the structured prompt now.";
 
   const text = await callAnthropic([{ role: "user", content: userMsg }], systemPrompt, 2048);
   const parsed = extractJSON(text);
 
-  // Hard fallback: if model returns null for a non-gibberish prompt, ask Q1 instead
   if (!parsed || parsed.type === "null") {
-    return {
-      type: "question",
-      questionNumber: 1,
-      question: q.q1,
-      allowFile: q.q1file,
-      fileLabel: q.q1label || null,
-      suggestion: null,
-      reason: null,
-      originalScore: null,
-      improvedScore: null,
-    };
+    return buildFallbackResponse(trimmed, browserHint.primary_intent, questionRound);
   }
 
+  const type = parsed.type === "suggestion" ? "suggestion" : "question";
+  const normalizedIntent = normalizeCoreIntent(parsed.classification?.core_intent || browserHint.primary_intent);
+  const fallback = buildFallbackResponse(trimmed, normalizedIntent, questionRound);
+  const questionNumber = type === "question"
+    ? (parsed.questionNumber || Math.min((questionRound || 0) + 1, 2))
+    : null;
+
   return {
-    type: parsed.type || "null",
-    questionNumber: parsed.questionNumber || null,
-    question: parsed.question || null,
-    allowFile: parsed.allowFile || false,
-    fileLabel: parsed.fileLabel || null,
-    suggestion: parsed.improved || null,
+    type,
+    questionNumber,
+    question: type === "question" ? (parsed.question || fallback.question) : null,
+    allowFile: Boolean(parsed.allowFile),
+    fileLabel: parsed.allowFile ? (parsed.fileLabel || fallback.fileLabel) : "",
+    suggestion: type === "suggestion" ? (parsed.improved || null) : null,
     reason: parsed.reason || null,
     originalScore: parsed.originalScore || null,
     improvedScore: parsed.improvedScore || null,
