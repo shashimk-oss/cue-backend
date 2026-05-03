@@ -367,6 +367,33 @@ Your job:
 3. Ask a personalized question when important context is missing.
 4. Generate a structured prompt when enough context exists.
 
+Cue success criteria:
+Universal prompt-quality criteria:
+- Clear intent: the prompt states exactly what operation the model should perform.
+- Sufficient context: the prompt includes the facts, background, source material, or assumptions needed to avoid guessing.
+- Relevant audience or user target: when the output is for someone, the recipient, reader, or end user is identified.
+- Goal and success standard: the prompt explains what the output should accomplish and what "good" looks like.
+- Constraints: tone, length, style, tools, sources, tech stack, timeframe, exclusions, or trade-offs are stated when relevant.
+- Output format: the response shape is explicit enough to make the result immediately usable.
+- No invented facts: use only user-provided information or clearly marked placeholders.
+- Token efficiency: keep the final prompt as short as possible while preserving reliability.
+
+Intent-specific criteria:
+- Email/outreach/create: recipient, recipient context, purpose, sender background/proof, tone, CTA, and exact output format.
+- Coding/generate_code/debug: tech stack, current behavior, expected behavior, relevant code/error/source, constraints, and desired deliverable.
+- Research/analyze/summarize: question, source scope, evidence handling, analysis angles, output format, and citation/source expectations when needed.
+- Compare/decide: options, criteria, weighting or priority, decision goal, trade-offs, and recommendation requirement.
+- Plan/strategy: goal, timeframe, constraints, stakeholders, level of detail, milestones, and success criteria.
+- Critique/optimize/transform: current version/source, target outcome, audience, preservation rules, constraints, and format.
+- Explain/teach: audience level, concept, depth, examples/analogies, and desired output form.
+
+Before returning JSON, silently score the candidate response against these criteria:
+- originalScore: how complete/useful the user's current prompt is from 0-100.
+- improvedScore: how complete/useful Cue's improved prompt would be from 0-100.
+- If critical criteria are missing and questionRound < 2, ask the single highest-impact question or rely on the live scaffold/fill-details flow if the user is still drafting.
+- If force generation is requested, generate the best possible prompt using available context and placeholders only for missing facts that materially affect quality.
+- A good improved prompt usually scores 85+. If it would score below 75, prefer one targeted question unless force generation is requested.
+
 Prompt construction standard:
 - Build prompts using Claude-style best practices: clear and direct instructions, enough context, a domain-appropriate role, explicit constraints, and a precise output format.
 - Prefer compact execution prompts over long strategy documents. The prompt should help the downstream model complete the user's task, not teach the user how to do the task unless the user asked for a plan, rubric, critique, or strategy.
@@ -416,7 +443,7 @@ Return ONLY valid JSON:
   "allowFile": true or false,
   "fileLabel": "specific upload label or empty string",
   "improved": "concise Claude-optimized structured prompt or null",
-  "reason": "short reason or null",
+  "reason": "short reason naming the biggest quality improvement or missing criterion",
   "originalScore": 0-100 or null,
   "improvedScore": 0-100 or null
 }`;
@@ -434,7 +461,7 @@ Return ONLY valid JSON:
   }
 
   userMsg += forceGenerate
-    ? "\nGenerate the best concise, executable structured prompt now using the original ask and gathered context. Do not create a strategy guide, rubric, or teaching document unless the user explicitly asked for one."
+    ? "\nGenerate the best concise, executable structured prompt now using the original ask and gathered context. Do not ask another question. If a critical fact is still missing, include a clearly marked placeholder only where that fact belongs. Do not create a strategy guide, rubric, or teaching document unless the user explicitly asked for one."
     : "\nIf one high-impact context gap remains, ask exactly one personalized question. If enough context exists, generate the structured prompt now.";
 
   const text = await callAnthropic([{ role: "user", content: userMsg }], systemPrompt, 2048);
